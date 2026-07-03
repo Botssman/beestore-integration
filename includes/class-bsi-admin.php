@@ -176,13 +176,37 @@ class BSI_Admin {
         }
 
         private function run_ftp_test() {
+                // Сначала получаем ВСЕ файлы в каталоге (для отладки).
+                $settings = get_option( 'bsi_settings', array() );
+                $path     = isset( $settings['ftp_path'] ) ? $settings['ftp_path'] : '/';
+
+                // Подключаемся и получаем полный список.
+                $all_files = array();
+                if ( function_exists( 'ftp_connect' ) && ! empty( $settings['ftp_host'] ) && ! empty( $settings['ftp_user'] ) ) {
+                        $conn = @ftp_connect( $settings['ftp_host'], isset( $settings['ftp_port'] ) ? (int) $settings['ftp_port'] : 21, 15 );
+                        if ( $conn ) {
+                                if ( @ftp_login( $conn, $settings['ftp_user'], isset( $settings['ftp_pass'] ) ? $settings['ftp_pass'] : '' ) ) {
+                                        ftp_pasv( $conn, true );
+                                        $all_files = @ftp_nlist( $conn, $path );
+                                        if ( false === $all_files ) {
+                                                $all_files = array();
+                                        }
+                                }
+                                ftp_close( $conn );
+                        }
+                }
+
+                // Теперь фильтруем по шаблону BeeStore.
                 $files = BSI_FTP::instance()->list_remote_zips();
                 if ( is_wp_error( $files ) ) {
                         return array(
-                                'success' => false,
-                                'message' => $files->get_error_message(),
+                                'success'           => false,
+                                'message'           => $files->get_error_message(),
+                                'all_files'         => array_slice( array_map( function ( $f ) { return basename( ltrim( $f, './' ) ); }, $all_files ), 0, 20 ),
+                                'ftp_path_setting'  => $path,
                         );
                 }
+
                 // Берём basename для отображения (FTP может вернуть полные пути).
                 $display_files = array_map(
                         function ( $f ) {
@@ -190,14 +214,33 @@ class BSI_Admin {
                         },
                         $files
                 );
+
+                // Готовим список всех файлов для отладки.
+                $all_display = array_map(
+                        function ( $f ) {
+                                return basename( ltrim( $f, './' ) );
+                        },
+                        $all_files
+                );
+
+                $message = sprintf(
+                        /* translators: %d — количество файлов. */
+                        __( 'Подключение успешно. Найдено ZIP-файлов BeeStore: %d', 'beestore-integration' ),
+                        count( $files )
+                );
+
+                if ( 0 === count( $files ) && ! empty( $all_files ) ) {
+                        $message .= ' — но в каталоге ' . $path . ' есть другие файлы (см. ниже). Проверьте, что файл называется COMPANY_*.zip или COMPANY_*.csv';
+                } elseif ( 0 === count( $files ) && empty( $all_files ) ) {
+                        $message .= ' — каталог ' . $path . ' пуст или недоступен. Попробуйте изменить "Каталог на FTP": /public_html/, /, /home/USER/domains/DOMAIN/public_html/';
+                }
+
                 return array(
-                        'success' => true,
-                        'message' => sprintf(
-                                /* translators: %d — количество файлов. */
-                                __( 'Подключение успешно. Найдено ZIP-файлов BeeStore: %d', 'beestore-integration' ),
-                                count( $files )
-                        ),
-                        'files'   => array_slice( $display_files, 0, 10 ),
+                        'success'          => true,
+                        'message'          => $message,
+                        'files'            => array_slice( $display_files, 0, 10 ),
+                        'all_files'        => array_slice( $all_display, 0, 20 ),
+                        'ftp_path_setting' => $path,
                 );
         }
 }

@@ -511,6 +511,11 @@ class BSI_Importer {
                 $price_disc   = isset( $row['PrezzoScontatoIvato'] ) ? (float) $row['PrezzoScontatoIvato'] : 0;
                 $discount     = isset( $row['Sconto'] ) ? (float) $row['Sconto'] : 0;
 
+                // Применяем конвертацию цен (если включена).
+                // Формула: цена_поставщика × курс_валюты × коэффициент_надбавки + фиксированная_надбавка
+                $price_gross = $this->convert_price( $price_gross );
+                $price_disc  = $this->convert_price( $price_disc );
+
                 if ( $price_gross > 0 ) {
                         $product->set_regular_price( wc_format_decimal( $price_gross, 2 ) );
                 }
@@ -527,6 +532,50 @@ class BSI_Importer {
                         $product->set_sale_price( '' );
                         $product->set_price( wc_format_decimal( $price_gross, 2 ) );
                 }
+        }
+
+        /**
+         * Конвертация цены по формуле:
+         *   итог = цена_поставщика × курс_валюты × коэффициент_надбавки + фиксированная_надбавка
+         *
+         * Пример:
+         *   цена поставщика = 100 EUR
+         *   курс = 100 (100 RUB за 1 EUR)
+         *   коэффициент = 1.3 (наценка 30%)
+         *   фикс = 500 RUB
+         *   итог = 100 × 100 × 1.3 + 500 = 13 500 RUB
+         *
+         * Если конвертация выключена — возвращает цену без изменений.
+         *
+         * @param float $price Цена в валюте поставщика.
+         * @return float Цена в валюте магазина.
+         */
+        private function convert_price( $price ) {
+                if ( $price <= 0 ) {
+                        return $price;
+                }
+
+                $settings = get_option( 'bsi_settings', array() );
+                $enabled  = isset( $settings['enable_price_conversion'] ) && '1' === $settings['enable_price_conversion'];
+
+                if ( ! $enabled ) {
+                        return $price;
+                }
+
+                $rate       = isset( $settings['currency_rate'] ) ? (float) $settings['currency_rate'] : 1;
+                $markup     = isset( $settings['markup_coefficient'] ) ? (float) $settings['markup_coefficient'] : 1;
+                $fixed      = isset( $settings['fixed_markup'] ) ? (float) $settings['fixed_markup'] : 0;
+                $round      = isset( $settings['round_prices'] ) && '1' === $settings['round_prices'];
+
+                // Формула.
+                $result = ( $price * $rate * $markup ) + $fixed;
+
+                // Округление до целых (если включено).
+                if ( $round ) {
+                        $result = round( $result );
+                }
+
+                return $result;
         }
 
         /* ---------------------------------------------------------------------

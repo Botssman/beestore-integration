@@ -17,6 +17,7 @@ class BSI_Installer {
         public static function activate() {
                 self::create_tables();
                 self::create_upload_dir();
+                self::register_attributes();
                 self::schedule_cron_events();
 
                 // Дефолтные опции (только если ещё не заданы).
@@ -72,6 +73,48 @@ class BSI_Installer {
          */
         public static function deactivate() {
                 self::clear_cron_events();
+        }
+
+        /**
+         * Регистрация глобальных атрибутов WooCommerce (pa_colore, pa_taglia).
+         *
+         * Без этого вариации не привязываются к значениям атрибутов.
+         */
+        public static function register_attributes() {
+                if ( ! function_exists( 'wc_create_attribute' ) ) {
+                        return;
+                }
+
+                $attributes_to_create = array(
+                        'colore' => __( 'Colore', 'beestore-integration' ),
+                        'taglia' => __( 'Taglia', 'beestore-integration' ),
+                );
+
+                // Получаем существующие атрибуты.
+                $existing_attributes = function_exists( 'wc_get_attribute_taxonomies' ) ? wc_get_attribute_taxonomies() : array();
+                $existing_slugs = array();
+                foreach ( $existing_attributes as $attr ) {
+                        $existing_slugs[] = $attr->attribute_name;
+                }
+
+                foreach ( $attributes_to_create as $slug => $name ) {
+                        if ( in_array( $slug, $existing_slugs, true ) ) {
+                                continue;
+                        }
+                        $args = array(
+                                'name'         => $name,
+                                'slug'         => $slug,
+                                'type'         => 'select',
+                                'order_by'     => 'menu_order',
+                                'has_archives' => false,
+                        );
+                        wc_create_attribute( $args );
+                }
+
+                // Важно: сбрасываем кэш атрибутов.
+                if ( function_exists( 'delete_transient' ) ) {
+                        delete_transient( 'wc_attribute_taxonomies' );
+                }
         }
 
         /**

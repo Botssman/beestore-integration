@@ -316,7 +316,7 @@ class BSI_Importer {
 
                 $product_id = $product->save();
 
-                // Атрибуты: Color + Size.
+                // Атрибуты: Color + Size (через глобальные таксономии pa_colore, pa_taglia).
                 $colors = array();
                 $sizes  = array();
                 foreach ( $variant_rows as $v ) {
@@ -333,22 +333,42 @@ class BSI_Importer {
                 $attributes = array();
 
                 if ( ! empty( $colors ) ) {
+                        // Создаём термы в pa_colore и собираем их slug'и.
+                        $color_slugs = array();
+                        foreach ( $colors as $color_name ) {
+                                $slug = $this->ensure_attribute_term( $color_name, 'pa_colore' );
+                                if ( $slug ) {
+                                        $color_slugs[] = $slug;
+                                }
+                        }
+
                         $attr_color = new WC_Product_Attribute();
-                        $attr_color->set_name( __( 'Colore', 'beestore-integration' ) );
-                        $attr_color->set_options( $colors );
+                        $attr_color->set_id( $this->get_attribute_id( 'pa_colore' ) );
+                        $attr_color->set_name( 'pa_colore' );
+                        $attr_color->set_options( $color_slugs );
                         $attr_color->set_position( 1 );
                         $attr_color->set_visible( true );
                         $attr_color->set_variation( true );
-                        $attributes[ sanitize_title( __( 'Colore', 'beestore-integration' ) ) ] = $attr_color;
+                        $attributes['pa_colore'] = $attr_color;
                 }
                 if ( ! empty( $sizes ) ) {
+                        // Создаём термы в pa_taglia.
+                        $size_slugs = array();
+                        foreach ( $sizes as $size_name ) {
+                                $slug = $this->ensure_attribute_term( $size_name, 'pa_taglia' );
+                                if ( $slug ) {
+                                        $size_slugs[] = $slug;
+                                }
+                        }
+
                         $attr_size = new WC_Product_Attribute();
-                        $attr_size->set_name( __( 'Taglia', 'beestore-integration' ) );
-                        $attr_size->set_options( $sizes );
+                        $attr_size->set_id( $this->get_attribute_id( 'pa_taglia' ) );
+                        $attr_size->set_name( 'pa_taglia' );
+                        $attr_size->set_options( $size_slugs );
                         $attr_size->set_position( 2 );
                         $attr_size->set_visible( true );
                         $attr_size->set_variation( true );
-                        $attributes[ sanitize_title( __( 'Taglia', 'beestore-integration' ) ) ] = $attr_size;
+                        $attributes['pa_taglia'] = $attr_size;
                 }
 
                 $product->set_attributes( $attributes );
@@ -384,7 +404,140 @@ class BSI_Importer {
 
                 WC_Product_Variable::sync( $product_id );
 
+                // Установим вариацию по умолчанию — первую доступную (с остатком > 0),
+                // иначе просто первую.
+                $this->set_default_variation( $product_id, $variant_rows );
+
                 return $product_id;
+        }
+
+        /**
+         * Получить ID глобального атрибута по slug.
+         *
+         * @param string $slug Slug атрибута (например 'colore' или 'pa_colore').
+         * @return int
+         */
+        private function get_attribute_id( $slug ) {
+                // Нормализуем slug — убираем префикс 'pa_'.
+                $slug = str_replace( 'pa_', '', $slug );
+
+                $taxonomy = function_exists( 'wc_attribute_taxonomy_name' ) ? wc_attribute_taxonomy_name( $slug ) : 'pa_' . $slug;
+                $attr_id  = 0;
+
+                if ( function_exists( 'wc_get_attribute' ) ) {
+                        $attr = wc_get_attribute( $slug );
+                        if ( $attr && isset( $attr->attribute_id ) ) {
+                                $attr_id = (int) $attr->attribute_id;
+                        }
+                }
+
+                return $attr_id;
+        }
+
+        /**
+         * Создать или получить терм атрибута в глобальной таксономии.
+         *
+         * @param string $name     Имя (например 'BLACK' или 'XXL').
+         * @param string $taxonomy Таксономия ('pa_colore' или 'pa_taglia').
+         * @return string slug терма (или пустая строка при ошибке).
+         */
+        private function ensure_attribute_term( $name, $taxonomy ) {
+                $name = trim( $name );
+                if ( empty( $name ) ) {
+                        return '';
+                }
+
+                // Проверяем существование таксономии.
+                if ( ! taxonomy_exists( $taxonomy ) ) {
+                        $this->log( 'warning', 'Таксономия атрибута не существует', array(
+                                'taxonomy' => $taxonomy,
+                                'hint'     => 'Деактивируйте и активируйте плагин BeeStore — атрибуты создаются при активации.',
+                        ) );
+                        return '';
+                }
+
+                // Ищем существующий терм по имени.
+                $existing = term_exists( $name, $taxonomy );
+                if ( is_array( $existing ) && isset( $existing['term_id'] ) ) {
+                        $term = get_term( $existing['term_id'], $taxonomy );
+                        return $term ? $term->slug : '';
+                }
+
+                // Создаём новый терм.
+                $result = wp_insert_term( $name, $taxonomy );
+                if ( is_wp_error( $result ) ) {
+                        $this->log( 'warning', 'Не удалось создать терм атрибута', array(
+                                'name'     => $name,
+                                'taxonomy' => $taxonomy,
+                                'error'    => $result->get_error_message(),
+                        ) );
+                        return '';
+                }
+
+                $term = get_term( $result['term_id'], $taxonomy );
+                return $term ? $term->slug : '';
+        }
+
+        /**
+         * Установить вариацию по умолчанию для вариативного товара.
+         *
+         * Без этого на странице товара не будет предвыбранного цвета/размера,
+         * и кнопка "Add to cart" может быть недоступна.
+         *
+         * @param int   $product_id    ID родительского товара.
+         * @param array $variant_rows  Массив строк CSV с вариациями.
+         */
+        private function set_default_variation( $product_id, $variant_rows ) {
+                $product = wc_get_product( $product_id );
+                if ( ! $product || ! ( $product instanceof WC_Product_Variable ) ) {
+                        return;
+                }
+
+                // Ищем первую вариацию с остатком > 0.
+                $default_color = '';
+                $default_size  = '';
+
+                foreach ( $variant_rows as $row ) {
+                        $stock = isset( $row['Disponibilita'] ) ? (float) $row['Disponibilita'] : 0;
+                        if ( $stock > 0 ) {
+                                if ( ! empty( $row['DSColore'] ) && empty( $default_color ) ) {
+                                        $color_slug = $this->ensure_attribute_term( $row['DSColore'], 'pa_colore' );
+                                        if ( $color_slug ) {
+                                                $default_color = $color_slug;
+                                        }
+                                }
+                                if ( ! empty( $row['Taglia'] ) && empty( $default_size ) ) {
+                                        $size_slug = $this->ensure_attribute_term( $row['Taglia'], 'pa_taglia' );
+                                        if ( $size_slug ) {
+                                                $default_size = $size_slug;
+                                        }
+                                }
+                                if ( $default_color && $default_size ) {
+                                        break;
+                                }
+                        }
+                }
+
+                // Если не нашли в наличии — берём первую вариацию.
+                if ( empty( $default_color ) && ! empty( $variant_rows[0]['DSColore'] ) ) {
+                        $default_color = $this->ensure_attribute_term( $variant_rows[0]['DSColore'], 'pa_colore' );
+                }
+                if ( empty( $default_size ) && ! empty( $variant_rows[0]['Taglia'] ) ) {
+                        $default_size = $this->ensure_attribute_term( $variant_rows[0]['Taglia'], 'pa_taglia' );
+                }
+
+                $default_attrs = array();
+                if ( $default_color ) {
+                        $default_attrs['pa_colore'] = $default_color;
+                }
+                if ( $default_size ) {
+                        $default_attrs['pa_taglia'] = $default_size;
+                }
+
+                if ( ! empty( $default_attrs ) ) {
+                        $product->set_default_attributes( $default_attrs );
+                        $product->save();
+                }
         }
 
         /**
@@ -409,16 +562,27 @@ class BSI_Importer {
 
                 $variation->set_parent_id( $product_id );
 
-                // Цвет и размер.
+                // Привязываем атрибуты к вариации через ГЛОБАЛЬНЫЕ термы таксономии.
+                // Это критически важно — иначе WooCommerce не покажет выбор на странице товара.
+                $attrs = array();
+
                 if ( ! empty( $row['DSColore'] ) ) {
-                        $variation->set_attributes( array( sanitize_title( __( 'Colore', 'beestore-integration' ) ) => sanitize_title( $row['DSColore'] ) ) );
+                        $color_slug = $this->ensure_attribute_term( $row['DSColore'], 'pa_colore' );
+                        if ( $color_slug ) {
+                                $attrs['pa_colore'] = $color_slug;
+                        }
                 }
-                // Taglia.
-                $attrs = $variation->get_attributes();
+
                 if ( ! empty( $row['Taglia'] ) ) {
-                        $attrs[ sanitize_title( __( 'Taglia', 'beestore-integration' ) ) ] = sanitize_title( $row['Taglia'] );
+                        $size_slug = $this->ensure_attribute_term( $row['Taglia'], 'pa_taglia' );
+                        if ( $size_slug ) {
+                                $attrs['pa_taglia'] = $size_slug;
+                        }
                 }
-                $variation->set_attributes( $attrs );
+
+                if ( ! empty( $attrs ) ) {
+                        $variation->set_attributes( $attrs );
+                }
 
                 // SKU.
                 if ( $cod_articolo ) {

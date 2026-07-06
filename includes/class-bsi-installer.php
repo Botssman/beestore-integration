@@ -51,6 +51,10 @@ class BSI_Installer {
                                 // Конвертация цен.
                                 'enable_price_conversion' => '0',
                                 'currency_rate'           => 1,    // Курс валюты (например, 100 = 100 RUB за 1 EUR).
+                                'currency_rate_mode'      => 'manual', // manual | auto
+                                'currency_rate_auto_source' => 'auto', // auto | cbrf | ecb | er_api
+                                'currency_rate_last_source' => '',   // Заполняется при авто-обновлении.
+                                'currency_rate_last_update' => '',   // Заполняется при авто-обновлении.
                                 'markup_coefficient'      => 1,    // Коэффициент надбавки (1.3 = наценка 30%).
                                 'fixed_markup'            => 0,    // Фиксированная надбавка в валюте магазина.
                                 'supplier_currency'       => 'EUR', // Валюта поставщика (BeeStore).
@@ -162,6 +166,10 @@ class BSI_Installer {
                 if ( ! wp_next_scheduled( 'bsi_cron_process_queue' ) ) {
                         wp_schedule_event( time() + 120, 'every5min', 'bsi_cron_process_queue' );
                 }
+                // Ежедневное обновление курса валют (в 06:00).
+                if ( ! wp_next_scheduled( 'bsi_cron_refresh_rate' ) ) {
+                        wp_schedule_event( strtotime( 'tomorrow 06:00' ), 'daily', 'bsi_cron_refresh_rate' );
+                }
         }
 
         /**
@@ -171,5 +179,6 @@ class BSI_Installer {
                 wp_clear_scheduled_hook( 'bsi_cron_import_catalog' );
                 wp_clear_scheduled_hook( 'bsi_cron_status_sync' );
                 wp_clear_scheduled_hook( 'bsi_cron_process_queue' );
+                wp_clear_scheduled_hook( 'bsi_cron_refresh_rate' );
         }
 }

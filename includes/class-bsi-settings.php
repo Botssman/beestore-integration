@@ -158,11 +158,18 @@ class BSI_Settings {
                 // Конвертация цен.
                 $output['enable_price_conversion'] = isset( $input['enable_price_conversion'] ) ? '1' : '0';
                 $output['currency_rate']           = isset( $input['currency_rate'] ) ? floatval( $input['currency_rate'] ) : 1;
+                $output['currency_rate_mode']      = isset( $input['currency_rate_mode'] ) ? sanitize_text_field( $input['currency_rate_mode'] ) : 'manual';
+                $output['currency_rate_auto_source'] = isset( $input['currency_rate_auto_source'] ) ? sanitize_text_field( $input['currency_rate_auto_source'] ) : 'auto';
                 $output['markup_coefficient']      = isset( $input['markup_coefficient'] ) ? floatval( $input['markup_coefficient'] ) : 1;
                 $output['fixed_markup']            = isset( $input['fixed_markup'] ) ? floatval( $input['fixed_markup'] ) : 0;
                 $output['supplier_currency']       = isset( $input['supplier_currency'] ) ? sanitize_text_field( $input['supplier_currency'] ) : 'EUR';
                 $output['shop_currency']           = isset( $input['shop_currency'] ) ? sanitize_text_field( $input['shop_currency'] ) : 'RUB';
                 $output['round_prices']            = isset( $input['round_prices'] ) ? '1' : '0';
+
+                // Сохраняем информацию о последнем авто-обновлении (не из формы, а из текущих опций).
+                $current = get_option( $this->settings_key, array() );
+                $output['currency_rate_last_source'] = isset( $current['currency_rate_last_source'] ) ? $current['currency_rate_last_source'] : '';
+                $output['currency_rate_last_update'] = isset( $current['currency_rate_last_update'] ) ? $current['currency_rate_last_update'] : '';
 
                 // Если курс задан неверно (0 или меньше) — сбрасываем на 1.
                 if ( $output['currency_rate'] <= 0 ) {

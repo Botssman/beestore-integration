@@ -16,7 +16,7 @@
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
-	exit; // Запрет прямого доступа.
+        exit; // Запрет прямого доступа.
 }
 
 /* -------------------------------------------------------------------------
@@ -35,76 +35,77 @@ define( 'BSI_QUEUE_TABLE', 'beestore_queue' );
  * Автозагрузка классов
  * ------------------------------------------------------------------------- */
 spl_autoload_register(
-	function ( $class ) {
-		$prefix = 'BSI_';
-		if ( strpos( $class, $prefix ) !== 0 ) {
-			return;
-		}
-		$relative  = substr( $class, strlen( $prefix ) );
-		$file_path = BSI_PLUGIN_DIR . 'includes/class-bsi-' . strtolower( str_replace( '_', '-', $relative ) ) . '.php';
-		if ( file_exists( $file_path ) ) {
-			require_once $file_path;
-		}
-	}
+        function ( $class ) {
+                $prefix = 'BSI_';
+                if ( strpos( $class, $prefix ) !== 0 ) {
+                        return;
+                }
+                $relative  = substr( $class, strlen( $prefix ) );
+                $file_path = BSI_PLUGIN_DIR . 'includes/class-bsi-' . strtolower( str_replace( '_', '-', $relative ) ) . '.php';
+                if ( file_exists( $file_path ) ) {
+                        require_once $file_path;
+                }
+        }
 );
 
 /* -------------------------------------------------------------------------
  * Проверка зависимостей (WooCommerce + PHP SoapClient)
  * ------------------------------------------------------------------------- */
 register_activation_hook(
-	__FILE__,
-	function () {
-		if ( ! class_exists( 'WooCommerce' ) ) {
-			deactivate_plugins( BSI_PLUGIN_BASENAME );
-			wp_die( esc_html__( 'Для работы плагина BeeStore Integration требуется установленный и активированный WooCommerce.', 'beestore-integration' ) );
-		}
-		if ( ! class_exists( 'SoapClient' ) ) {
-			deactivate_plugins( BSI_PLUGIN_BASENAME );
-			wp_die( esc_html__( 'Для работы плагина BeeStore Integration требуется расширение PHP SOAP. Обратитесь к хостинг-провайдеру для его включения.', 'beestore-integration' ) );
-		}
-		BSI_Installer::activate();
-	}
+        __FILE__,
+        function () {
+                if ( ! class_exists( 'WooCommerce' ) ) {
+                        deactivate_plugins( BSI_PLUGIN_BASENAME );
+                        wp_die( esc_html__( 'Для работы плагина BeeStore Integration требуется установленный и активированный WooCommerce.', 'beestore-integration' ) );
+                }
+                if ( ! class_exists( 'SoapClient' ) ) {
+                        deactivate_plugins( BSI_PLUGIN_BASENAME );
+                        wp_die( esc_html__( 'Для работы плагина BeeStore Integration требуется расширение PHP SOAP. Обратитесь к хостинг-провайдеру для его включения.', 'beestore-integration' ) );
+                }
+                BSI_Installer::activate();
+        }
 );
 
 register_deactivation_hook(
-	__FILE__,
-	function () {
-		BSI_Installer::deactivate();
-	}
+        __FILE__,
+        function () {
+                BSI_Installer::deactivate();
+        }
 );
 
 /* -------------------------------------------------------------------------
  * Инициализация плагина
  * ------------------------------------------------------------------------- */
 add_action(
-	'plugins_loaded',
-	function () {
-		// Тексты домена.
-		load_plugin_textdomain( 'beestore-integration', false, dirname( BSI_PLUGIN_BASENAME ) . '/languages' );
+        'plugins_loaded',
+        function () {
+                // Тексты домена.
+                load_plugin_textdomain( 'beestore-integration', false, dirname( BSI_PLUGIN_BASENAME ) . '/languages' );
 
-		// Не продолжаем, если нет WC.
-		if ( ! class_exists( 'WooCommerce' ) ) {
-			add_action(
-				'admin_notices',
-				function () {
-					echo '<div class="notice notice-error"><p>' .
-						esc_html__( 'BeeStore Integration: WooCommerce не активен. Плагин не будет работать.', 'beestore-integration' ) .
-						'</p></div>';
-				}
-			);
-			return;
-		}
+                // Не продолжаем, если нет WC.
+                if ( ! class_exists( 'WooCommerce' ) ) {
+                        add_action(
+                                'admin_notices',
+                                function () {
+                                        echo '<div class="notice notice-error"><p>' .
+                                                esc_html__( 'BeeStore Integration: WooCommerce не активен. Плагин не будет работать.', 'beestore-integration' ) .
+                                                '</p></div>';
+                                }
+                        );
+                        return;
+                }
 
-		// Инициализация модулей.
-		BSI_Settings::instance();
-		BSI_Logger::instance();
-		BSI_Client::instance();
-		BSI_FTP::instance();
-		BSI_CSV_Parser::instance();
-		BSI_Importer::instance();
-		BSI_Order_Sync::instance();
-		BSI_Status_Sync::instance();
-		BSI_Admin::instance();
-		BSI_Cron::instance();
-	}
+                // Инициализация модулей.
+                BSI_Settings::instance();
+                BSI_Logger::instance();
+                BSI_Client::instance();
+                BSI_FTP::instance();
+                BSI_CSV_Parser::instance();
+                BSI_Importer::instance();
+                BSI_Order_Sync::instance();
+                BSI_Status_Sync::instance();
+                BSI_Currency::instance();
+                BSI_Admin::instance();
+                BSI_Cron::instance();
+        }
 );

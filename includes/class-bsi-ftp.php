@@ -289,11 +289,22 @@ class BSI_FTP {
         }
 
         /**
-         * Полный цикл: опрос FTP → скачивание самого нового файла → распаковка (если ZIP).
+         * Полный цикл: опрос FTP → выбор правильного файла → скачивание → распаковка (если ZIP).
          *
-         * Поддерживает 2 типа файлов от Sirio:
+         * Логика выбора файла (по письму Sirio от 2026-06):
+         *   - Файл _0000001.csv — ПОЛНЫЙ каталог (создаётся ночью, ~57000 строк)
+         *   - Файлы _0000002.csv, _0000003.csv, ... — ИНКРЕМЕНТАЛЬНЫЕ (только изменения за 15 минут)
+         *
+         * Алгоритм:
+         *   1. Если в processed/ НЕТ ни одного обработанного файла (первый запуск):
+         *      → берём самый свежий _0000001.csv (полный каталог за последнюю ночь)
+         *   2. Если в processed/ уже есть обработанные файлы:
+         *      → ищем следующий файл по sequence number после последнего обработанного
+         *      → если следующий файл не найден — значит новых изменений нет
+         *
+         * Поддерживаем 2 типа файлов:
          *   - .zip   — архив с CSV внутри (нужно распаковать)
-         *   - .csv   — голый CSV-файл (по письму Sirio от 2026-06)
+         *   - .csv   — голый CSV-файл (по письму Sirio)
          *
          * @return array|WP_Error  [ 'zip' => local_zip_path|'', 'csv' => extracted_csv_path, 'remote_name' => name ]
          */
@@ -306,43 +317,163 @@ class BSI_FTP {
                         return new WP_Error( 'bsi_ftp_empty', __( 'На FTP нет файлов BeeStore (COMPANY_*.zip или COMPANY_*.csv).', 'beestore-integration' ) );
                 }
 
-                // Проверим — не обработан ли уже самый свежий.
-                $latest_name = $files[0];
-                $latest_basename = basename( ltrim( $latest_name, './' ) );
-                $processed_marker = trailingslashit( $this->get_processed_dir() ) . sanitize_file_name( $latest_basename );
-                if ( file_exists( $processed_marker ) ) {
-                        return new WP_Error( 'bsi_already_processed', sprintf( __( 'Самый свежий файл %s уже обработан ранее.', 'beestore-integration' ), $latest_basename ) );
+                // Парсим имена файлов: извлекаем дату+время и sequence number.
+                // Формат: COMPANY_0540_0000_2026-07-06_12-15-25_0000027.csv
+                //                              ↑↑↑↑-↑↑-↑↑  ↑↑-↑↑-↑↑  ↑↑↑↑↑↑↑
+                //                              дата        время     sequence
+                $parsed = array();
+                foreach ( $files as $remote_path ) {
+                        $name = basename( ltrim( $remote_path, './' ) );
+                        if ( preg_match( '/^COMPANY_(\d+)_0000_([0-9\-]+)_([0-9\-]+)_(\d+)\.(zip|csv)$/i', $name, $m ) ) {
+                                $parsed[] = array(
+                                        'remote_path' => $remote_path,
+                                        'name'        => $name,
+                                        'store_num'   => $m[1],
+                                        'date'        => $m[2],
+                                        'time'        => $m[3],
+                                        'sequence'    => (int) $m[4],
+                                        'ext'         => strtolower( $m[5] ),
+                                        'sort_key'    => $m[2] . '_' . $m[3], // для сортировки по дате+времени
+                                );
+                        }
                 }
 
-                $local_file = $this->download_remote_zip( $latest_name );
+                if ( empty( $parsed ) ) {
+                        return new WP_Error( 'bsi_ftp_no_match', __( 'На FTP есть файлы, но ни один не подходит под шаблон BeeStore.', 'beestore-integration' ) );
+                }
+
+                // Сортируем по дате_времени ПО ВОЗРАСТАНИЮ (старые — первыми).
+                usort( $parsed, function ( $a, $b ) {
+                        return strcmp( $a['sort_key'], $b['sort_key'] );
+                } );
+
+                // Ищем последний обработанный файл (по sequence и дате).
+                $processed_dir = $this->get_processed_dir();
+                $last_processed = null;
+                if ( is_dir( $processed_dir ) ) {
+                        $processed_files = glob( $processed_dir . '/COMPANY_*' );
+                        if ( ! empty( $processed_files ) ) {
+                                foreach ( $processed_files as $pf ) {
+                                        $pf_name = basename( $pf );
+                                        if ( preg_match( '/^COMPANY_(\d+)_0000_([0-9\-]+)_([0-9\-]+)_(\d+)\.(zip|csv)$/i', $pf_name, $m ) ) {
+                                                $candidate = array(
+                                                        'date'     => $m[2],
+                                                        'time'     => $m[3],
+                                                        'sequence' => (int) $m[4],
+                                                        'sort_key' => $m[2] . '_' . $m[3],
+                                                );
+                                                if ( ! $last_processed || strcmp( $candidate['sort_key'], $last_processed['sort_key'] ) > 0 ) {
+                                                        $last_processed = $candidate;
+                                                }
+                                        }
+                                }
+                        }
+                }
+
+                // Выбираем файл для импорта.
+                $target = null;
+                if ( ! $last_processed ) {
+                        // Первый запуск — ищем самый свежий _0000001.csv (полный каталог).
+                        // Сначала пытаемся найти _0000001 за самую свежую дату.
+                        $full_catalog_files = array_filter( $parsed, function ( $p ) {
+                                return 1 === $p['sequence'];
+                        } );
+                        if ( ! empty( $full_catalog_files ) ) {
+                                // Берём самый свежий _0000001.
+                                $target = end( $full_catalog_files );
+                                BSI_Logger::instance()->info( 'ftp', 'Первый импорт: выбран полный каталог', array(
+                                        'file' => $target['name'],
+                                ) );
+                        } else {
+                                // Если _0000001 не нашли — берём самый старый файл (возможно, только инкрементальные).
+                                $target = $parsed[0];
+                                BSI_Logger::instance()->warn( 'ftp', 'Не найден _0000001.csv (полный каталог). Берём самый старый файл.', array(
+                                        'file' => $target['name'],
+                                ) );
+                        }
+                } else {
+                        // Уже импортировали — ищем следующий файл после последнего обработанного.
+                        // Логика: берём файлы с sort_key > last_processed.sort_key
+                        $next_files = array_filter( $parsed, function ( $p ) use ( $last_processed ) {
+                                return strcmp( $p['sort_key'], $last_processed['sort_key'] ) > 0;
+                        } );
+
+                        if ( empty( $next_files ) ) {
+                                return new WP_Error(
+                                        'bsi_no_new_files',
+                                        sprintf(
+                                                __( 'Нет новых файлов для импорта. Последний обработанный: %s_%s (sequence %d).', 'beestore-integration' ),
+                                                $last_processed['date'],
+                                                $last_processed['time'],
+                                                $last_processed['sequence']
+                                        )
+                                );
+                        }
+
+                        // Если последний обработанный был _0000001 (полный каталог),
+                        // а теперь новый день начался (появился новый _0000001) —
+                        // нужно импортировать новый _0000001 как полную замену.
+                        $new_full_catalog = array_filter( $next_files, function ( $p ) {
+                                return 1 === $p['sequence'];
+                        } );
+                        if ( ! empty( $new_full_catalog ) && 1 !== $last_processed['sequence'] ) {
+                                // Был инкрементальный, появился новый полный — берём полный.
+                                $target = end( $new_full_catalog );
+                                BSI_Logger::instance()->info( 'ftp', 'Новый полный каталог (новые сутки)', array(
+                                        'file' => $target['name'],
+                                ) );
+                        } else {
+                                // Берём самый старый из новых (по порядку времени).
+                                $target = reset( $next_files );
+                                BSI_Logger::instance()->info( 'ftp', 'Импорт инкрементального файла', array(
+                                        'file' => $target['name'],
+                                        'last_processed' => $last_processed['sort_key'],
+                                ) );
+                        }
+                }
+
+                if ( ! $target ) {
+                        return new WP_Error( 'bsi_no_target', __( 'Не удалось выбрать файл для импорта.', 'beestore-integration' ) );
+                }
+
+                // Проверим — не обработан ли уже этот файл.
+                $processed_marker = trailingslashit( $processed_dir ) . sanitize_file_name( $target['name'] );
+                if ( file_exists( $processed_marker ) ) {
+                        return new WP_Error(
+                                'bsi_already_processed',
+                                sprintf( __( 'Файл %s уже обработан ранее.', 'beestore-integration' ), $target['name'] )
+                        );
+                }
+
+                // Скачиваем.
+                $local_file = $this->download_remote_zip( $target['remote_path'] );
                 if ( is_wp_error( $local_file ) ) {
                         return $local_file;
                 }
 
                 // Определяем тип файла по расширению.
-                $ext = strtolower( pathinfo( $latest_name, PATHINFO_EXTENSION ) );
-
-                if ( 'csv' === $ext ) {
-                        // Голый CSV — ничего распаковывать не нужно, файл уже готов.
-                        BSI_Logger::instance()->info( 'ftp', 'Получен голый CSV-файл (без ZIP-обёртки)', array(
-                                'file' => $latest_name,
-                                'local' => $local_file,
+                if ( 'csv' === $target['ext'] ) {
+                        // Голый CSV — ничего распаковывать не нужно.
+                        BSI_Logger::instance()->info( 'ftp', 'Получен CSV-файл', array(
+                                'file' => $target['name'],
+                                'sequence' => $target['sequence'],
+                                'is_full_catalog' => ( 1 === $target['sequence'] ),
                         ) );
                         return array(
                                 'zip'         => '',
                                 'csv'         => $local_file,
-                                'remote_name' => $latest_name,
+                                'remote_name' => $target['remote_path'],
                         );
                 }
 
                 // Это ZIP — распаковываем.
-                $files = $this->extract_zip( $local_file );
-                if ( is_wp_error( $files ) ) {
-                        return $files;
+                $extracted = $this->extract_zip( $local_file );
+                if ( is_wp_error( $extracted ) ) {
+                        return $extracted;
                 }
 
                 $csv_file = '';
-                foreach ( $files as $f ) {
+                foreach ( $extracted as $f ) {
                         if ( '.csv' === strtolower( substr( $f, -4 ) ) ) {
                                 $csv_file = $f;
                                 break;
@@ -355,7 +486,7 @@ class BSI_FTP {
                 return array(
                         'zip'         => $local_file,
                         'csv'         => $csv_file,
-                        'remote_name' => $latest_name,
+                        'remote_name' => $target['remote_path'],
                 );
         }
 }

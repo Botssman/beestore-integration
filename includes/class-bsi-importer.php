@@ -39,6 +39,8 @@ class BSI_Importer {
                 add_action( 'bsi_cron_import_catalog', array( $this, 'cron_import' ) );
                 // AJAX/ручной запуск.
                 add_action( 'wp_ajax_bsi_manual_import', array( $this, 'ajax_manual_import' ) );
+                // AJAX backfill картинок (докачка после разблокировки Sirio).
+                add_action( 'wp_ajax_bsi_backfill_images', array( $this, 'ajax_backfill_images' ) );
         }
 
         /* ---------------------------------------------------------------------
@@ -674,10 +676,22 @@ class BSI_Importer {
                         return;
                 }
 
+                // Сохраняем ВСЕ URL картинок в meta — даже если не скачиваем.
+                // Это позволит потом запустить "backfill" и докачать их,
+                // когда Sirio разблокирует ваш IP на сервере картинок.
+                update_post_meta( $product_id, '_bsi_image_urls', $image_urls );
+                // Совместимость со старым полем — первая картинка.
+                update_post_meta( $product_id, '_bsi_image_url', $image_urls[0] );
+
+                // Если скачивание выключено — выходим, URL уже сохранены в meta.
+                if ( ! $download_images ) {
+                        return;
+                }
+
                 // Первая картинка = featured, остальные — галерея.
                 $featured_url = array_shift( $image_urls );
 
-                $thumb_id = $this->attach_image( $featured_url, $product_id, $download_images );
+                $thumb_id = $this->attach_image( $featured_url, $product_id, true );
                 if ( $thumb_id ) {
                         set_post_thumbnail( $product_id, $thumb_id );
                 }
@@ -685,7 +699,7 @@ class BSI_Importer {
                 // Галерея.
                 $gallery_ids = array();
                 foreach ( $image_urls as $url ) {
-                        $attach_id = $this->attach_image( $url, $product_id, $download_images );
+                        $attach_id = $this->attach_image( $url, $product_id, true );
                         if ( $attach_id ) {
                                 $gallery_ids[] = $attach_id;
                         }
@@ -808,5 +822,102 @@ class BSI_Importer {
          * --------------------------------------------------------------------- */
         private function log( $level, $message, $context = array() ) {
                 BSI_Logger::instance()->log( $level, 'importer', $message, $context );
+        }
+
+        /* ---------------------------------------------------------------------
+         * Backfill картинок — докачка URLs сохранённых в meta.
+         *
+         * Используется когда изначально импорт прошёл без скачивания картинок
+         * (например, Sirio блокировал сервер картинок), а потом доступ открыли.
+         * --------------------------------------------------------------------- */
+        public function ajax_backfill_images() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $batch_size = isset( $_POST['batch_size'] ) ? absint( $_POST['batch_size'] ) : 20;
+                $offset     = isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0;
+
+                // Ищем товары с сохранёнными URL картинок, но без featured image.
+                $query = new WP_Query( array(
+                        'post_type'      => array( 'product', 'product_variation' ),
+                        'posts_per_page' => $batch_size,
+                        'offset'         => $offset,
+                        'post_status'    => 'any',
+                        'meta_query'     => array(
+                                array(
+                                        'key'     => '_bsi_image_urls',
+                                        'compare' => 'EXISTS',
+                                ),
+                        ),
+                        'fields'         => 'ids',
+                        'no_found_rows'  => false,
+                ) );
+
+                $total      = $query->found_posts;
+                $processed  = 0;
+                $success    = 0;
+                $failed     = 0;
+                $errors     = array();
+
+                foreach ( $query->posts as $product_id ) {
+                        $processed++;
+                        $urls = get_post_meta( $product_id, '_bsi_image_urls', true );
+                        if ( empty( $urls ) || ! is_array( $urls ) ) {
+                                continue;
+                        }
+
+                        // Пропускаем если уже есть featured image.
+                        if ( has_post_thumbnail( $product_id ) ) {
+                                $success++;
+                                continue;
+                        }
+
+                        // Пытаемся скачать первую картинку.
+                        $featured_url = $urls[0];
+                        $attach_id = $this->attach_image( $featured_url, $product_id, true );
+
+                        if ( $attach_id ) {
+                                set_post_thumbnail( $product_id, $attach_id );
+                                $success++;
+
+                                // Галерея.
+                                $gallery_ids = array();
+                                $gallery_urls = array_slice( $urls, 1 );
+                                foreach ( $gallery_urls as $url ) {
+                                        $g_attach = $this->attach_image( $url, $product_id, true );
+                                        if ( $g_attach ) {
+                                                $gallery_ids[] = $g_attach;
+                                        }
+                                }
+                                if ( ! empty( $gallery_ids ) ) {
+                                        update_post_meta( $product_id, '_product_image_gallery', implode( ',', $gallery_ids ) );
+                                }
+                        } else {
+                                $failed++;
+                                if ( count( $errors ) < 3 ) {
+                                        $errors[] = sprintf( 'Product #%d: %s', $product_id, $featured_url );
+                                }
+                        }
+                }
+
+                $this->log( 'info', 'Backfill картинок: пачка обработана', array(
+                        'offset'    => $offset,
+                        'processed' => $processed,
+                        'success'   => $success,
+                        'failed'    => $failed,
+                        'total'     => $total,
+                ) );
+
+                wp_send_json_success( array(
+                        'processed' => $processed,
+                        'success'   => $success,
+                        'failed'    => $failed,
+                        'total'     => $total,
+                        'next_offset' => $offset + $processed,
+                        'has_more'  => ( $offset + $processed ) < $total,
+                        'errors'    => $errors,
+                ) );
         }
 }

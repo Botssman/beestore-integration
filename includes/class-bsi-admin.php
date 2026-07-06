@@ -39,6 +39,15 @@ class BSI_Admin {
 
                 add_submenu_page(
                         'beestore-integration',
+                        __( 'Каталог с FTP', 'beestore-integration' ),
+                        __( 'Каталог с FTP', 'beestore-integration' ),
+                        $cap,
+                        'bsi-catalog-browser',
+                        array( $this, 'render_catalog_browser_page' )
+                );
+
+                add_submenu_page(
+                        'beestore-integration',
                         __( 'Логи', 'beestore-integration' ),
                         __( 'Логи', 'beestore-integration' ),
                         $cap,
@@ -242,5 +251,155 @@ class BSI_Admin {
                         'all_files'        => array_slice( $all_display, 0, 20 ),
                         'ftp_path_setting' => $path,
                 );
+        }
+
+        /* ---------------------------------------------------------------------
+         * Страница «Каталог с FTP» — просмотр и скачивание файлов BeeStore.
+         * --------------------------------------------------------------------- */
+        public function render_catalog_browser_page() {
+                // Обработка действий.
+                $action = isset( $_GET['bsi_action'] ) ? sanitize_text_field( wp_unslash( $_GET['bsi_action'] ) ) : 'list';
+                $file   = isset( $_GET['file'] ) ? sanitize_text_field( wp_unslash( $_GET['file'] ) ) : '';
+
+                // Скачивание файла с FTP на сервер.
+                if ( 'fetch' === $action && $file && check_admin_referer( 'bsi_fetch_file' ) ) {
+                        $result = $this->fetch_file_from_ftp( $file );
+                        $fetch_result = $result;
+                } else {
+                        $fetch_result = null;
+                }
+
+                // Удаление локального файла.
+                if ( 'delete_local' === $action && $file && check_admin_referer( 'bsi_delete_local' ) ) {
+                        $upload_dir = wp_upload_dir();
+                        $local_file = trailingslashit( $upload_dir['basedir'] ) . 'beestore/manual-downloads/' . sanitize_file_name( $file );
+                        if ( file_exists( $local_file ) ) {
+                                unlink( $local_file );
+                        }
+                        $fetch_result = array(
+                                'success' => true,
+                                'message' => sprintf( __( 'Файл %s удалён с сервера.', 'beestore-integration' ), $file ),
+                        );
+                }
+
+                // Отдача файла пользователю (скачать на компьютер).
+                if ( 'download' === $action && $file && check_admin_referer( 'bsi_download_file' ) ) {
+                        $this->download_file_to_browser( $file );
+                        return;
+                }
+
+                // Получаем список файлов с FTP.
+                $remote_files = BSI_FTP::instance()->list_remote_zips();
+
+                // Парсим имена для отображения.
+                $remote_parsed = array();
+                if ( ! is_wp_error( $remote_files ) ) {
+                        foreach ( $remote_files as $remote_path ) {
+                                $name = basename( ltrim( $remote_path, './' ) );
+                                if ( preg_match( '/^COMPANY_(\d+)_0000_([0-9\-]+)_([0-9\-]+)_(\d+)\.(zip|csv)$/i', $name, $m ) ) {
+                                        $remote_parsed[] = array(
+                                                'name'      => $name,
+                                                'remote_path' => $remote_path,
+                                                'date'      => $m[2],
+                                                'time'      => $m[3],
+                                                'sequence'  => (int) $m[4],
+                                                'is_full'   => ( 1 === (int) $m[4] ),
+                                        );
+                                }
+                        }
+                        // Сортируем — новые сверху.
+                        usort( $remote_parsed, function ( $a, $b ) {
+                                return strcmp( $b['date'] . '_' . $b['time'], $a['date'] . '_' . $a['time'] );
+                        } );
+                }
+
+                // Список уже скачанных файлов.
+                $upload_dir = wp_upload_dir();
+                $local_dir  = trailingslashit( $upload_dir['basedir'] ) . 'beestore/manual-downloads';
+                $local_files = array();
+                if ( is_dir( $local_dir ) ) {
+                        $local_files = glob( $local_dir . '/COMPANY_*' );
+                }
+
+                include BSI_PLUGIN_DIR . 'templates/catalog-browser-page.php';
+        }
+
+        /**
+         * Скачать файл с FTP на сервер (в папку manual-downloads).
+         */
+        private function fetch_file_from_ftp( $remote_path ) {
+                $settings = get_option( 'bsi_settings', array() );
+                if ( empty( $settings['ftp_host'] ) || empty( $settings['ftp_user'] ) ) {
+                        return array( 'success' => false, 'message' => __( 'FTP не настроен.', 'beestore-integration' ) );
+                }
+
+                $upload_dir = wp_upload_dir();
+                $local_dir  = trailingslashit( $upload_dir['basedir'] ) . 'beestore/manual-downloads';
+                if ( ! file_exists( $local_dir ) ) {
+                        wp_mkdir_p( $local_dir );
+                }
+                $local_file = trailingslashit( $local_dir ) . sanitize_file_name( basename( $remote_path ) );
+
+                if ( ! function_exists( 'ftp_connect' ) ) {
+                        return array( 'success' => false, 'message' => __( 'PHP ftp не установлен.', 'beestore-integration' ) );
+                }
+
+                $conn = @ftp_connect( $settings['ftp_host'], isset( $settings['ftp_port'] ) ? (int) $settings['ftp_port'] : 21, 30 );
+                if ( ! $conn ) {
+                        return array( 'success' => false, 'message' => __( 'Не удалось подключиться к FTP.', 'beestore-integration' ) );
+                }
+
+                $login = @ftp_login( $conn, $settings['ftp_user'], isset( $settings['ftp_pass'] ) ? $settings['ftp_pass'] : '' );
+                if ( ! $login ) {
+                        ftp_close( $conn );
+                        return array( 'success' => false, 'message' => __( 'Неверный логин/пароль FTP.', 'beestore-integration' ) );
+                }
+
+                ftp_pasv( $conn, true );
+
+                $success = @ftp_get( $conn, $local_file, $remote_path, FTP_BINARY );
+                if ( ! $success ) {
+                        // Fallback — путь относительно ftp_path.
+                        $fallback = trailingslashit( $settings['ftp_path'] ) . basename( $remote_path );
+                        $success = @ftp_get( $conn, $local_file, $fallback, FTP_BINARY );
+                }
+
+                ftp_close( $conn );
+
+                if ( ! $success ) {
+                        return array( 'success' => false, 'message' => __( 'Не удалось скачать файл с FTP.', 'beestore-integration' ) );
+                }
+
+                $size = size_format( filesize( $local_file ) );
+                return array(
+                        'success' => true,
+                        'message' => sprintf(
+                                /* translators: 1: имя файла, 2: размер */
+                                __( 'Файл %1$s (%2$s) скачан на сервер.', 'beestore-integration' ),
+                                basename( $remote_path ),
+                                $size
+                        ),
+                );
+        }
+
+        /**
+         * Отдать локальный файл пользователю для скачивания.
+         */
+        private function download_file_to_browser( $filename ) {
+                $upload_dir = wp_upload_dir();
+                $local_file = trailingslashit( $upload_dir['basedir'] ) . 'beestore/manual-downloads/' . sanitize_file_name( $filename );
+
+                if ( ! file_exists( $local_file ) ) {
+                        wp_die( esc_html__( 'Файл не найден на сервере.', 'beestore-integration' ) );
+                }
+
+                nocache_headers();
+                header( 'Content-Description: File Transfer' );
+                header( 'Content-Type: application/octet-stream' );
+                header( 'Content-Disposition: attachment; filename="' . basename( $local_file ) . '"' );
+                header( 'Content-Transfer-Encoding: binary' );
+                header( 'Content-Length: ' . filesize( $local_file ) );
+                readfile( $local_file );
+                exit;
         }
 }

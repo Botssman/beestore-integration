@@ -41,6 +41,366 @@ class BSI_Importer {
                 add_action( 'wp_ajax_bsi_manual_import', array( $this, 'ajax_manual_import' ) );
                 // AJAX backfill картинок (докачка после разблокировки Sirio).
                 add_action( 'wp_ajax_bsi_backfill_images', array( $this, 'ajax_backfill_images' ) );
+
+                // Новые AJAX-эндпоинты для импорта с сохранением прогресса.
+                add_action( 'wp_ajax_bsi_import_start', array( $this, 'ajax_import_start' ) );
+                add_action( 'wp_ajax_bsi_import_process_batch', array( $this, 'ajax_import_process_batch' ) );
+                add_action( 'wp_ajax_bsi_import_pause', array( $this, 'ajax_import_pause' ) );
+                add_action( 'wp_ajax_bsi_import_stop', array( $this, 'ajax_import_stop' ) );
+                add_action( 'wp_ajax_bsi_import_status', array( $this, 'ajax_import_status' ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * Управление состоянием импорта (сохраняется в БД).
+         * --------------------------------------------------------------------- */
+
+        /**
+         * Получить текущее состояние импорта.
+         *
+         * @return array
+         */
+        public function get_import_state() {
+                $state = get_option( 'bsi_import_state', array() );
+                $defaults = array(
+                        'status'          => 'idle',     // idle | running | paused | completed | error
+                        'csv_file'        => '',         // локальный путь к CSV
+                        'remote_name'     => '',         // имя файла на FTP
+                        'is_full_catalog' => false,
+                        'total_rows'      => 0,
+                        'processed_rows'  => 0,
+                        'last_offset'     => 0,
+                        'started_at'      => '',
+                        'last_update'     => '',
+                        'elapsed_seconds' => 0,
+                        'errors_count'    => 0,
+                        'last_error'      => '',
+                        'batch_size'      => 50,
+                        'created_products' => 0,
+                        'updated_products' => 0,
+                );
+                return wp_parse_args( $state, $defaults );
+        }
+
+        /**
+         * Сохранить состояние импорта.
+         *
+         * @param array $state
+         */
+        private function save_import_state( $state ) {
+                $state['last_update'] = current_time( 'mysql' );
+                update_option( 'bsi_import_state', $state, false );
+        }
+
+        /**
+         * Обновить отдельные поля состояния.
+         */
+        private function update_import_state( $fields ) {
+                $state = $this->get_import_state();
+                $state = array_merge( $state, $fields );
+                $this->save_import_state( $state );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: начать новый импорт (скачивает файл с FTP, инициализирует state).
+         * --------------------------------------------------------------------- */
+        public function ajax_import_start() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                // Если уже идёт импорт — не запускать новый.
+                $state = $this->get_import_state();
+                if ( 'running' === $state['status'] ) {
+                        wp_send_json_error( array( 'message' => __( 'Импорт уже идёт. Обновите страницу.', 'beestore-integration' ) ) );
+                }
+
+                // Скачиваем файл с FTP.
+                $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
+                if ( is_wp_error( $fetch_result ) ) {
+                        wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
+                }
+
+                $csv_file = $fetch_result['csv'];
+                $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
+
+                // Считаем количество строк.
+                $count_result = BSI_CSV_Parser::instance()->count_lines( $csv_file );
+                $total_rows = max( 0, $count_result - 1 ); // минус заголовок.
+
+                // Определяем, полный ли это каталог.
+                $is_full = preg_match( '/_0000001\./', $remote_name );
+
+                // Сохраняем состояние.
+                $new_state = array(
+                        'status'          => 'running',
+                        'csv_file'        => $csv_file,
+                        'remote_name'     => $remote_name,
+                        'is_full_catalog' => (bool) $is_full,
+                        'total_rows'      => $total_rows,
+                        'processed_rows'  => 0,
+                        'last_offset'     => 0,
+                        'started_at'      => current_time( 'mysql' ),
+                        'last_update'     => current_time( 'mysql' ),
+                        'elapsed_seconds' => 0,
+                        'errors_count'    => 0,
+                        'last_error'      => '',
+                        'batch_size'      => 50,
+                        'created_products' => 0,
+                        'updated_products' => 0,
+                );
+                $this->save_import_state( $new_state );
+
+                // Сохраняем имя файла как маркер.
+                update_option( 'bsi_last_import_zip', $remote_name );
+                update_option( 'bsi_last_import_started', current_time( 'mysql' ) );
+
+                $this->log( 'info', 'Старт импорта (новая система с прогрессом)', array(
+                        'file'        => $remote_name,
+                        'total_rows'  => $total_rows,
+                        'is_full'     => $is_full,
+                ) );
+
+                wp_send_json_success( array(
+                        'message'     => sprintf( __( 'Импорт запущен. Файл: %s, строк: %d', 'beestore-integration' ), $remote_name, $total_rows ),
+                        'state'       => $new_state,
+                ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: обработать один батч (50 строк).
+         * --------------------------------------------------------------------- */
+        public function ajax_import_process_batch() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $state = $this->get_import_state();
+                if ( 'running' !== $state['status'] ) {
+                        wp_send_json_error( array( 'message' => sprintf( __( 'Импорт не запущен (статус: %s)', 'beestore-integration' ), $state['status'] ) ) );
+                }
+
+                if ( empty( $state['csv_file'] ) || ! file_exists( $state['csv_file'] ) ) {
+                        $this->update_import_state( array(
+                                'status'     => 'error',
+                                'last_error' => 'CSV файл не найден: ' . $state['csv_file'],
+                        ) );
+                        wp_send_json_error( array( 'message' => 'CSV файл не найден' ) );
+                }
+
+                // Открываем CSV, пропускаем заголовок и уже обработанные строки.
+                $parser = BSI_CSV_Parser::instance()->open( $state['csv_file'] );
+                if ( is_wp_error( $parser ) ) {
+                        $this->update_import_state( array(
+                                'status'     => 'error',
+                                'last_error' => $parser->get_error_message(),
+                        ) );
+                        wp_send_json_error( array( 'message' => $parser->get_error_message() ) );
+                }
+
+                // Пропускаем уже обработанные строки.
+                $skip = (int) $state['last_offset'];
+                $current_index = 0;
+                $batch_size = (int) $state['batch_size'];
+                $batch_rows = array();
+                $start_time = microtime( true );
+
+                foreach ( $parser as $idx => $row ) {
+                        $current_index++;
+                        if ( $current_index <= $skip ) {
+                                continue;
+                        }
+                        $batch_rows[] = $row;
+                        if ( count( $batch_rows ) >= $batch_size ) {
+                                break;
+                        }
+                }
+                $parser->close();
+
+                if ( empty( $batch_rows ) ) {
+                        // Импорт завершён.
+                        $this->update_import_state( array(
+                                'status'         => 'completed',
+                                'processed_rows' => $state['total_rows'],
+                                'last_offset'    => $state['total_rows'],
+                        ) );
+
+                        // Пометить файл как обработанный.
+                        $file_to_mark = $fetch_result['zip'] ?? '';
+                        if ( ! $file_to_mark ) {
+                                $file_to_mark = $state['csv_file'];
+                        }
+                        BSI_FTP::instance()->mark_processed( $file_to_mark );
+
+                        update_option( 'bsi_last_import_finished', current_time( 'mysql' ) );
+
+                        $report = array(
+                                'success'         => true,
+                                'rows_processed'  => $state['processed_rows'],
+                                'elapsed_seconds' => $state['elapsed_seconds'],
+                        );
+                        update_option( 'bsi_last_import_report', $report );
+
+                        $this->log( 'info', 'Импорт завершён', $report );
+
+                        wp_send_json_success( array(
+                                'message' => __( 'Импорт завершён!', 'beestore-integration' ),
+                                'state'   => $this->get_import_state(),
+                                'finished' => true,
+                        ) );
+                }
+
+                // Обрабатываем батч.
+                $settings = get_option( 'bsi_settings', array() );
+                $created = 0;
+                $updated = 0;
+                $errors = 0;
+                $last_error = '';
+
+                // Группируем по IGUArticolo внутри батча.
+                $models_in_batch = array();
+                foreach ( $batch_rows as $row ) {
+                        $igu = isset( $row['IGUArticolo'] ) ? $row['IGUArticolo'] : '';
+                        if ( ! $igu ) {
+                                continue;
+                        }
+                        if ( ! isset( $models_in_batch[ $igu ] ) ) {
+                                $models_in_batch[ $igu ] = array(
+                                        'parent'   => $row,
+                                        'variants' => array(),
+                                );
+                        }
+                        $models_in_batch[ $igu ]['variants'][] = $row;
+                }
+
+                // Импортируем каждую модель.
+                foreach ( $models_in_batch as $igu => $data ) {
+                        try {
+                                // Проверяем, новый ли товар (по meta).
+                                $existing_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu );
+                                $this->upsert_model( $igu, $data['parent'], $data['variants'] );
+                                if ( $existing_id ) {
+                                        $updated++;
+                                } else {
+                                        $created++;
+                                }
+                        } catch ( Exception $e ) {
+                                $errors++;
+                                $last_error = $e->getMessage();
+                                $this->log( 'error', 'Ошибка импорта модели', array(
+                                        'igu' => $igu,
+                                        'err' => $last_error,
+                                ) );
+                        }
+                }
+
+                $elapsed_batch = microtime( true ) - $start_time;
+
+                // Обновляем состояние.
+                $new_offset = $current_index;
+                $new_processed = $state['processed_rows'] + count( $batch_rows );
+                $total_elapsed = $state['elapsed_seconds'] + $elapsed_batch;
+
+                $this->update_import_state( array(
+                        'processed_rows'  => $new_processed,
+                        'last_offset'     => $new_offset,
+                        'elapsed_seconds' => $total_elapsed,
+                        'errors_count'    => $state['errors_count'] + $errors,
+                        'last_error'      => $last_error ?: $state['last_error'],
+                        'created_products' => $state['created_products'] + $created,
+                        'updated_products' => $state['updated_products'] + $updated,
+                ));
+
+                $updated_state = $this->get_import_state();
+                $percent = $updated_state['total_rows'] > 0
+                        ? round( ( $updated_state['processed_rows'] / $updated_state['total_rows'] ) * 100, 1 )
+                        : 0;
+
+                wp_send_json_success( array(
+                        'message'  => sprintf(
+                                __( 'Обработано: %d / %d (%.1f%%). Создано: %d, обновлено: %d, ошибок: %d', 'beestore-integration' ),
+                                $updated_state['processed_rows'],
+                                $updated_state['total_rows'],
+                                $percent,
+                                $created,
+                                $updated,
+                                $errors
+                        ),
+                        'state'    => $updated_state,
+                        'percent'  => $percent,
+                        'finished' => false,
+                ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: пауза импорта.
+         * --------------------------------------------------------------------- */
+        public function ajax_import_pause() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $state = $this->get_import_state();
+                if ( 'running' !== $state['status'] ) {
+                        wp_send_json_error( array( 'message' => __( 'Импорт не запущен.', 'beestore-integration' ) ) );
+                }
+
+                $this->update_import_state( array( 'status' => 'paused' ) );
+                wp_send_json_success( array( 'message' => __( 'Импорт приостановлен.', 'beestore-integration' ) ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: продолжить импорт.
+         * --------------------------------------------------------------------- */
+        public function ajax_import_continue() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $state = $this->get_import_state();
+                if ( 'paused' !== $state['status'] && 'error' !== $state['status'] ) {
+                        wp_send_json_error( array( 'message' => sprintf( __( 'Нельзя продолжить (статус: %s)', 'beestore-integration' ), $state['status'] ) ) );
+                }
+
+                $this->update_import_state( array( 'status' => 'running' ) );
+                wp_send_json_success( array( 'message' => __( 'Импорт продолжён.', 'beestore-integration' ) ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: остановить импорт (сброс).
+         * --------------------------------------------------------------------- */
+        public function ajax_import_stop() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                // Сбрасываем состояние.
+                delete_option( 'bsi_import_state' );
+                wp_send_json_success( array( 'message' => __( 'Импорт остановлен. Прогресс сброшен.', 'beestore-integration' ) ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: получить текущее состояние импорта (для polling).
+         * --------------------------------------------------------------------- */
+        public function ajax_import_status() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $state = $this->get_import_state();
+                $percent = $state['total_rows'] > 0
+                        ? round( ( $state['processed_rows'] / $state['total_rows'] ) * 100, 1 )
+                        : 0;
+
+                wp_send_json_success( array(
+                        'state'   => $state,
+                        'percent' => $percent,
+                ) );
         }
 
         /* ---------------------------------------------------------------------

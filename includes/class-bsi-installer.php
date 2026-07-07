@@ -86,8 +86,13 @@ class BSI_Installer {
                 }
 
                 $attributes_to_create = array(
-                        'colore' => __( 'Colore', 'beestore-integration' ),
-                        'taglia' => __( 'Taglia', 'beestore-integration' ),
+                        'colore'     => __( 'Colore', 'beestore-integration' ),
+                        'taglia'     => __( 'Taglia', 'beestore-integration' ),
+                        'brand'      => __( 'Бренд', 'beestore-integration' ),
+                        'stagione'   => __( 'Сезон', 'beestore-integration' ),
+                        'country'    => __( 'Страна', 'beestore-integration' ),
+                        'sesso'      => __( 'Пол', 'beestore-integration' ),
+                        'collezione' => __( 'Коллекция', 'beestore-integration' ),
                 );
 
                 // Получаем существующие атрибуты.

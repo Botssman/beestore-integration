@@ -48,6 +48,9 @@ class BSI_Importer {
                 add_action( 'wp_ajax_bsi_import_pause', array( $this, 'ajax_import_pause' ) );
                 add_action( 'wp_ajax_bsi_import_stop', array( $this, 'ajax_import_stop' ) );
                 add_action( 'wp_ajax_bsi_import_status', array( $this, 'ajax_import_status' ) );
+
+                // AJAX: полная очистка товаров и категорий BeeStore.
+                add_action( 'wp_ajax_bsi_purge_all', array( $this, 'ajax_purge_all' ) );
         }
 
         /* ---------------------------------------------------------------------
@@ -381,6 +384,93 @@ class BSI_Importer {
                 // Сбрасываем состояние.
                 delete_option( 'bsi_import_state' );
                 wp_send_json_success( array( 'message' => __( 'Импорт остановлен. Прогресс сброшен.', 'beestore-integration' ) ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: полная очистка товаров BeeStore, брендов, категорий.
+         * --------------------------------------------------------------------- */
+        public function ajax_purge_all() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                global $wpdb;
+                $deleted_products = 0;
+                $deleted_terms    = 0;
+
+                // 1. Находим все товары BeeStore (по meta _bsi_igu_articolo).
+                $product_ids = $wpdb->get_col( $wpdb->prepare(
+                        "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s",
+                        '_bsi_igu_articolo'
+                ) );
+
+                if ( ! empty( $product_ids ) ) {
+                        // Включаем вариации этих товаров.
+                        $variation_ids = $wpdb->get_col(
+                                "SELECT ID FROM {$wpdb->posts}
+                                 WHERE post_type = 'product_variation'
+                                 AND post_parent IN (" . implode( ',', array_map( 'intval', $product_ids ) ) . ')'
+                        );
+                        $all_ids = array_merge( $product_ids, $variation_ids );
+
+                        foreach ( $all_ids as $pid ) {
+                                wp_delete_post( $pid, true );
+                                $deleted_products++;
+                        }
+                }
+
+                // 2. Очищаем все термы BeeStore в таксономиях product_cat, pa_brand, pa_colore, pa_taglia, pa_stagione, pa_country, pa_sesso, pa_collezione.
+                $taxonomies_to_clean = array( 'product_cat', 'pa_brand', 'pa_colore', 'pa_taglia', 'pa_stagione', 'pa_country', 'pa_sesso', 'pa_collezione' );
+                if ( taxonomy_exists( 'product_brand' ) ) {
+                        $taxonomies_to_clean[] = 'product_brand';
+                }
+
+                foreach ( $taxonomies_to_clean as $tax ) {
+                        if ( ! taxonomy_exists( $tax ) ) {
+                                continue;
+                        }
+                        $terms = get_terms( array(
+                                'taxonomy'   => $tax,
+                                'hide_empty' => false,
+                                'number'     => 0,
+                        ) );
+
+                        if ( is_wp_error( $terms ) ) {
+                                continue;
+                        }
+
+                        foreach ( $terms as $term ) {
+                                // Удаляем только термы, которые точно созданы BeeStore.
+                                // Чтобы не удалить вручную созданные категории, проверяем: удаляем только если есть товары с meta _bsi_igu_articolo, и они привязаны к этому терму.
+                                // Упрощаем: удаляем все термы в pa_* таксономиях, которые создал плагин.
+                                // НЕ ТРОГАЕМ Uncategorized (id=1) в product_cat.
+                                if ( 'product_cat' === $tax && 'uncategorized' === $term->slug ) {
+                                        continue;
+                                }
+                                wp_delete_term( $term->term_id, $tax );
+                                $deleted_terms++;
+                        }
+                }
+
+                // 3. Сбрасываем состояние импорта.
+                delete_option( 'bsi_import_state' );
+
+                $this->log( 'info', 'Полная очистка BeeStore данных', array(
+                        'deleted_products' => $deleted_products,
+                        'deleted_terms'    => $deleted_terms,
+                ) );
+
+                wp_send_json_success( array(
+                        'message' => sprintf(
+                                /* translators: 1: товаров, 2: термов */
+                                __( 'Очистка завершена. Удалено товаров: %1$d, термов: %2$d. Можно запускать чистый импорт.', 'beestore-integration' ),
+                                $deleted_products,
+                                $deleted_terms
+                        ),
+                        'deleted_products' => $deleted_products,
+                        'deleted_terms'    => $deleted_terms,
+                ) );
         }
 
         /* ---------------------------------------------------------------------
@@ -1136,24 +1226,66 @@ class BSI_Importer {
                 // Подкатегория — Reparto.
                 if ( ! empty( $row['DSRepartoWeb'] ) ) {
                         $cat_ids[] = $this->ensure_term( $row['DSRepartoWeb'], 'product_cat', $category );
+                } elseif ( ! empty( $row['DSReparto'] ) ) {
+                        $cat_ids[] = $this->ensure_term( $row['DSReparto'], 'product_cat', $category );
                 }
                 if ( ! empty( $cat_ids ) ) {
                         wp_set_post_terms( $product_id, array_filter( $cat_ids ), 'product_cat' );
                 }
 
-                // Бренд (Marca) — таксономия product_brand (если активна) или pa_brand.
-                if ( ! empty( $row['DSMarcaWeb'] ) ) {
+                // Бренд — ИСПОЛЬЗУЕМ DSLinea (в нём лежит реальный бренд: VERSACE, BENEDETTA BRUZZICHES, LEVI'S).
+                // DSMarca / DSMarcaWeb содержит СТРАНУ производства (ITALY, IT) — НЕ бренд!
+                $brand_name = '';
+                if ( ! empty( $row['DSLinea'] ) ) {
+                        $brand_name = $row['DSLinea'];
+                } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
+                        $brand_name = $row['RaggruppamentoLinea'];
+                }
+
+                if ( $brand_name ) {
+                        // Приоритет: product_brand (если есть плагин Brands), иначе pa_brand.
                         $brand_tax = taxonomy_exists( 'product_brand' ) ? 'product_brand' : 'pa_brand';
                         if ( taxonomy_exists( $brand_tax ) ) {
-                                $brand_id = $this->ensure_term( $row['DSMarcaWeb'], $brand_tax );
+                                $brand_id = $this->ensure_term( $brand_name, $brand_tax );
                                 wp_set_post_terms( $product_id, array( $brand_id ), $brand_tax );
                         }
                 }
 
-                // Сезон — как атрибут-таксономия pa_stagione.
-                if ( ! empty( $row['DSStagioneWeb'] ) && taxonomy_exists( 'pa_stagione' ) ) {
-                        $season_id = $this->ensure_term( $row['DSStagioneWeb'], 'pa_stagione' );
+                // Сезон — pa_stagione (например: 26S, 25W, Continuativo).
+                $season_name = '';
+                if ( ! empty( $row['DSStagioneWeb'] ) ) {
+                        $season_name = $row['DSStagioneWeb'];
+                } elseif ( ! empty( $row['DSStagione'] ) ) {
+                        $season_name = $row['DSStagione'];
+                }
+                if ( $season_name && taxonomy_exists( 'pa_stagione' ) ) {
+                        $season_id = $this->ensure_term( $season_name, 'pa_stagione' );
                         wp_set_post_terms( $product_id, array( $season_id ), 'pa_stagione' );
+                }
+
+                // Страна производства — pa_country (DSMarca = ITALY, CHINA, INDONESIA).
+                // НЕ DSMarcaWeb — там коды (IT, CN, ID).
+                if ( ! empty( $row['DSMarca'] ) && taxonomy_exists( 'pa_country' ) ) {
+                        $country_id = $this->ensure_term( $row['DSMarca'], 'pa_country' );
+                        wp_set_post_terms( $product_id, array( $country_id ), 'pa_country' );
+                }
+
+                // Пол — pa_sesso (DONNA/UOMO или WOMAN/MAN).
+                $gender_name = '';
+                if ( ! empty( $row['DSSessoWeb'] ) ) {
+                        $gender_name = $row['DSSessoWeb'];
+                } elseif ( ! empty( $row['DSSesso'] ) ) {
+                        $gender_name = $row['DSSesso'];
+                }
+                if ( $gender_name && taxonomy_exists( 'pa_sesso' ) ) {
+                        $gender_id = $this->ensure_term( $gender_name, 'pa_sesso' );
+                        wp_set_post_terms( $product_id, array( $gender_id ), 'pa_sesso' );
+                }
+
+                // Тип коллекции — pa_collezione (Precollezione, Continuativo, Riassortimento Negozi).
+                if ( ! empty( $row['DSCampionario'] ) && taxonomy_exists( 'pa_collezione' ) ) {
+                        $coll_id = $this->ensure_term( $row['DSCampionario'], 'pa_collezione' );
+                        wp_set_post_terms( $product_id, array( $coll_id ), 'pa_collezione' );
                 }
         }
 

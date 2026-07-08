@@ -121,14 +121,38 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Импорт уже идёт. Обновите страницу.', 'beestore-integration' ) ) );
                 }
 
-                // Скачиваем файл с FTP.
-                $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
-                if ( is_wp_error( $fetch_result ) ) {
-                        wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
+                // СНАЧАЛА проверяем — есть ли уже скачанный CSV на сервере.
+                $upload_dir    = wp_upload_dir();
+                $downloads_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/downloads';
+                $extracted_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/extracted';
+
+                $csvs = glob( $downloads_dir . '/*.csv' );
+                if ( empty( $csvs ) && is_dir( $extracted_dir ) ) {
+                        $csvs = glob( $extracted_dir . '/*/*.csv' );
                 }
 
-                $csv_file = $fetch_result['csv'];
-                $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
+                if ( ! empty( $csvs ) ) {
+                        // CSV уже скачан — используем его, не трогаем FTP.
+                        $csv_file   = $csvs[0];
+                        $remote_name = basename( $csv_file );
+
+                        BSI_Logger::instance()->info( 'importer', 'Используем уже скачанный CSV', array(
+                                'file' => $remote_name,
+                        ) );
+                } else {
+                        // CSV нет — скачиваем с FTP.
+                        if ( function_exists( 'set_time_limit' ) ) {
+                                @set_time_limit( 600 );
+                        }
+
+                        $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
+                        if ( is_wp_error( $fetch_result ) ) {
+                                wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
+                        }
+
+                        $csv_file    = $fetch_result['csv'];
+                        $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
+                }
 
                 // Считаем количество строк.
                 $count_result = BSI_CSV_Parser::instance()->count_lines( $csv_file );

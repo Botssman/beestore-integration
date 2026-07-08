@@ -1,0 +1,13 @@
+# Игнорируем системные файлы
+.DS_Store
+__MACOSX/
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Логи и временные файлы
+*.log
+debug.log

@@ -1,24 +1,25 @@
 /* BeeStore Integration admin styles */
 
-/* Иконки на кнопках выровнены по центру */
-.button .dashicons,
-.button-secondary .dashicons,
-.button-primary .dashicons,
-.button-link-delete .dashicons,
-.button-large .dashicons {
+/* Иконки на кнопках выровнены по центру — перебиваем .wp-core-ui правило темы */
+.wp-core-ui .button .dashicons,
+.wp-core-ui .button-secondary .dashicons,
+.wp-core-ui .button-primary .dashicons,
+.wp-core-ui .button-link-delete .dashicons,
+.wp-core-ui .button-large .dashicons {
         vertical-align: middle !important;
+        line-height: 1 !important;
         margin-top: -2px !important;
-        margin-right: 2px;
+        margin-right: 4px;
         position: relative;
         top: 1px;
 }
 
-/* Нормальный line-height для кнопок BeeStore (тема может ставить 1.9 — иконка съезжает) */
-.bsi-card .button,
-.bsi-card .button-secondary,
-.bsi-card .button-primary,
-.bsi-card .button-link-delete,
-.bsi-card .button-large {
+/* Нормальный line-height для кнопок BeeStore (тема ставит 1.9) */
+.wp-core-ui .bsi-card .button,
+.wp-core-ui .bsi-card .button-secondary,
+.wp-core-ui .bsi-card .button-primary,
+.wp-core-ui .bsi-card .button-link-delete,
+.wp-core-ui .bsi-card .button-large {
         line-height: 1.4 !important;
         height: auto !important;
         min-height: 30px;
@@ -27,7 +28,7 @@
 }
 
 /* Для крупных кнопок чуть больше отступ */
-.button-large .dashicons {
+.wp-core-ui .button-large .dashicons {
         margin-top: -1px !important;
         top: 2px;
 }

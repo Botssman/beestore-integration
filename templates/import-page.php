@@ -56,6 +56,12 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
 
                 <div id="bsi-import-empty" <?php echo 'idle' === $state['status'] ? '' : 'style="display:none;"'; ?>>
                         <p><?php esc_html_e( 'Импорт не запущен. Нажмите кнопку «Начать импорт» ниже, чтобы скачать файл с FTP Sirio и начать обработку.', 'beestore-integration' ); ?></p>
+                        <p>
+                                <button type="button" class="button button-primary button-large" id="bsi-btn-start-empty">
+                                        <span class="dashicons dashicons-controls-play"></span>
+                                        <?php esc_html_e( 'Начать импорт', 'beestore-integration' ); ?>
+                                </button>
+                        </p>
                 </div>
 
                 <div id="bsi-import-active" <?php echo 'idle' === $state['status'] ? 'style="display:none;"' : ''; ?>>
@@ -406,7 +412,7 @@ jQuery(document).ready(function($){
         }
 
         // Обработчики кнопок.
-        $('#bsi-btn-start').on('click', function() {
+        $('#bsi-btn-start, #bsi-btn-start-empty').on('click', function() {
                 var $btn = $(this);
                 $btn.prop('disabled', true);
                 appendLog('Запуск импорта...', 'info');
@@ -419,6 +425,9 @@ jQuery(document).ready(function($){
                         if (response.success) {
                                 appendLog(response.data.message, 'info');
                                 updateUI(response.data.state, 0);
+                                // Переключаемся с empty на active вид.
+                                $('#bsi-import-empty').hide();
+                                $('#bsi-import-active').show();
                                 startBatchLoop();
                                 startPolling();
                         } else {

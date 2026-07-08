@@ -134,6 +134,37 @@ class BSI_Importer {
                 // Определяем, полный ли это каталог.
                 $is_full = preg_match( '/_0000001\./', $remote_name );
 
+                // ПРЕДСКАНИРОВАНИЕ: строим индекс IGUArticolo → количество вариантов.
+                // Это критически важно: без этого плагин не знает, сколько всего вариантов
+                // у товара во всём файле, и может создать простой товар вместо вариативного.
+                $index = array();
+                $scan_parser = BSI_CSV_Parser::instance()->open( $csv_file );
+                if ( ! is_wp_error( $scan_parser ) ) {
+                        foreach ( $scan_parser as $row ) {
+                                $igu = isset( $row['IGUArticolo'] ) ? $row['IGUArticolo'] : '';
+                                if ( $igu ) {
+                                        if ( ! isset( $index[ $igu ] ) ) {
+                                                $index[ $igu ] = 0;
+                                        }
+                                        $index[ $igu ]++;
+                                }
+                        }
+                        $scan_parser->close();
+                }
+
+                // Сохраняем индекс в файл (он нужен при обработке батчей).
+                $upload_dir = wp_upload_dir();
+                $index_file = trailingslashit( $upload_dir['basedir'] ) . 'beestore/import-index.json';
+                file_put_contents( $index_file, wp_json_encode( $index ) );
+
+                $multi_variant_count = count( array_filter( $index, function ( $c ) { return $c > 1; } ) );
+
+                BSI_Logger::instance()->info( 'importer', 'Предсканирование завершено', array(
+                        'total_igu'       => count( $index ),
+                        'multi_variant'   => $multi_variant_count,
+                        'single_variant'  => count( $index ) - $multi_variant_count,
+                ) );
+
                 // Сохраняем состояние.
                 $new_state = array(
                         'status'          => 'running',
@@ -261,6 +292,17 @@ class BSI_Importer {
                 $errors = 0;
                 $last_error = '';
 
+                // Загружаем индекс IGUArticolo → count (построен при старте импорта).
+                $upload_dir = wp_upload_dir();
+                $index_file = trailingslashit( $upload_dir['basedir'] ) . 'beestore/import-index.json';
+                $index = array();
+                if ( file_exists( $index_file ) ) {
+                        $index = json_decode( file_get_contents( $index_file ), true );
+                        if ( ! is_array( $index ) ) {
+                                $index = array();
+                        }
+                }
+
                 // Группируем по IGUArticolo внутри батча.
                 $models_in_batch = array();
                 foreach ( $batch_rows as $row ) {
@@ -280,9 +322,13 @@ class BSI_Importer {
                 // Импортируем каждую модель.
                 foreach ( $models_in_batch as $igu => $data ) {
                         try {
+                                // Определяем, многовариантный ли это товар ВО ВСЁМ ФАЙЛЕ (не в батче!).
+                                $total_count = isset( $index[ $igu ] ) ? $index[ $igu ] : count( $data['variants'] );
+                                $is_multi_variant = $total_count > 1;
+
                                 // Проверяем, новый ли товар (по meta).
                                 $existing_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu );
-                                $this->upsert_model( $igu, $data['parent'], $data['variants'] );
+                                $this->upsert_model( $igu, $data['parent'], $data['variants'], $is_multi_variant );
                                 if ( $existing_id ) {
                                         $updated++;
                                 } else {
@@ -656,27 +702,20 @@ class BSI_Importer {
          *
          * @param string $igu_articolo
          * @param array  $parent_row   Строка CSV родителя (первая встреченная).
-         * @param array  $variant_rows Массив строк вариантов (цвет/размер).
+         * @param array  $variant_rows Массив строк вариантов (цвет/размер) из текущего батча.
+         * @param bool   $is_multi_variant true если во всём файле у этого IGUArticolo > 1 варианта.
+         *                                 Передаётся из предсканирования, чтобы избежать создания
+         *                                 простого товара когда варианты разбросаны по батчам.
          */
-        private function upsert_model( $igu_articolo, $parent_row, $variant_rows ) {
-                // Проверим количество вариантов.
-                $variants_count = count( $variant_rows );
-                $is_variable = $variants_count > 1;
-
-                // Если все строки имеют одинаковый цвет и размер — простой товар.
-                if ( 1 === $variants_count ) {
-                        $is_variable = false;
-                } else {
-                        // Проверим — может быть одна модель, но разные размеры. Тогда variable.
-                        $unique_combos = array();
-                        foreach ( $variant_rows as $v ) {
-                                $key = $v['CodColore'] . '|' . $v['Taglia'];
-                                $unique_combos[ $key ] = true;
-                        }
-                        if ( count( $unique_combos ) <= 1 ) {
-                                $is_variable = false;
-                        }
+        private function upsert_model( $igu_articolo, $parent_row, $variant_rows, $is_multi_variant = null ) {
+                if ( null === $is_multi_variant ) {
+                        $is_multi_variant = count( $variant_rows ) > 1;
                 }
+
+                // Решение: простой или вариативный товар.
+                // Если во всём файле > 1 варианта — всегда вариативный, даже если в текущем батче 1 вариант.
+                // (остальные варианты придут в следующих батчах)
+                $is_variable = $is_multi_variant;
 
                 if ( $is_variable ) {
                         $this->upsert_variable_product( $igu_articolo, $parent_row, $variant_rows );
@@ -744,6 +783,22 @@ class BSI_Importer {
          * --------------------------------------------------------------------- */
         private function upsert_variable_product( $igu_articolo, $parent_row, $variant_rows ) {
                 $product_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu_articolo );
+
+                // Если существующий товар — ПРОСТОЙ, а должен быть ВАРИАТИВНЫМ,
+                // удаляем простой товар (это миграция при повторном импорте с фиксом).
+                if ( $product_id ) {
+                        $existing = wc_get_product( $product_id );
+                        if ( $existing && ! ( $existing instanceof WC_Product_Variable ) ) {
+                                $this->log( 'info', 'Удаление простого товара для создания вариативного', array(
+                                        'igu'         => $igu_articolo,
+                                        'old_id'      => $product_id,
+                                        'old_type'    => $existing->get_type(),
+                                ) );
+                                // Удаляем старый простой товар (force=true, чтобы удалить без корзины).
+                                wp_delete_post( $product_id, true );
+                                $product_id = 0;
+                        }
+                }
 
                 $product = ( $product_id )
                         ? wc_get_product( $product_id )

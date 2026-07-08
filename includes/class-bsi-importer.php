@@ -329,14 +329,26 @@ class BSI_Importer {
                 $skipped_by_filter = 0;
                 foreach ( $models_in_batch as $igu => $data ) {
                         try {
-                                // Получаем категорию и бренд из строки для проверки фильтром.
+                                // Получаем макро-категорию, подкатегорию и бренд из строки для проверки фильтром.
                                 $row = $data['parent'];
+
+                                // Макро-категория (CLOTHING, SHOES, BAGS).
                                 $category = '';
-                                if ( ! empty( $row['DSCategoriaMerceologicaWeb'] ) ) {
-                                        $category = $row['DSCategoriaMerceologicaWeb'];
-                                } elseif ( ! empty( $row['DSCategoriaMerceologica'] ) ) {
-                                        $category = $row['DSCategoriaMerceologica'];
+                                if ( ! empty( $row['DSRepartoWeb'] ) ) {
+                                        $category = $row['DSRepartoWeb'];
+                                } elseif ( ! empty( $row['DSReparto'] ) ) {
+                                        $category = $row['DSReparto'];
                                 }
+
+                                // Если макро-категории нет — используем подкатегорию.
+                                if ( ! $category ) {
+                                        if ( ! empty( $row['DSCategoriaMerceologicaWeb'] ) ) {
+                                                $category = $row['DSCategoriaMerceologicaWeb'];
+                                        } elseif ( ! empty( $row['DSCategoriaMerceologica'] ) ) {
+                                                $category = $row['DSCategoriaMerceologica'];
+                                        }
+                                }
+
                                 $brand = '';
                                 if ( ! empty( $row['DSLinea'] ) ) {
                                         $brand = $row['DSLinea'];
@@ -1346,53 +1358,60 @@ class BSI_Importer {
          * Категории / атрибуты как таксономии.
          * --------------------------------------------------------------------- */
         private function apply_terms( $product_id, $row ) {
-                // Категория товара (Macro Category / Categoria Merceologica).
-                $category = isset( $row['DSCategoriaMerceologicaWeb'] ) && $row['DSCategoriaMerceologicaWeb']
-                        ? $row['DSCategoriaMerceologicaWeb']
-                        : ( isset( $row['DSCategoriaMerceologica'] ) ? $row['DSCategoriaMerceologica'] : '' );
-
-                // Перевод категории (если задан во вкладке "Переводы").
-                if ( $category ) {
-                        $translated = BSI_Translations::instance()->get_translation( 'product_cat', $category );
+                // === МАКРО-КАТЕГОРИЯ (DSRepartoWeb — CLOTHING, SHOES, BAGS) ===
+                $macro_cat = '';
+                if ( ! empty( $row['DSRepartoWeb'] ) ) {
+                        $macro_cat = $row['DSRepartoWeb'];
+                } elseif ( ! empty( $row['DSReparto'] ) ) {
+                        $macro_cat = $row['DSReparto'];
+                }
+                // Перевод макро-категории.
+                if ( $macro_cat ) {
+                        $translated = BSI_Translations::instance()->get_translation( 'product_cat', $macro_cat );
                         if ( $translated ) {
-                                $category = $translated;
+                                $macro_cat = $translated;
                         }
                 }
 
-                $cat_ids = array();
-                if ( $category ) {
-                        $cat_ids[] = $this->ensure_term( $category, 'product_cat' );
-                }
-                // Подкатегория — Reparto.
-                $subcat = '';
-                if ( ! empty( $row['DSRepartoWeb'] ) ) {
-                        $subcat = $row['DSRepartoWeb'];
-                } elseif ( ! empty( $row['DSReparto'] ) ) {
-                        $subcat = $row['DSReparto'];
+                // === ПОДКАТЕГОРИЯ (DSCategoriaMerceologicaWeb — JEANS, SNEAKERS, HANDBAGS) ===
+                $sub_cat = '';
+                if ( ! empty( $row['DSCategoriaMerceologicaWeb'] ) ) {
+                        $sub_cat = $row['DSCategoriaMerceologicaWeb'];
+                } elseif ( ! empty( $row['DSCategoriaMerceologica'] ) ) {
+                        $sub_cat = $row['DSCategoriaMerceologica'];
                 }
                 // Перевод подкатегории.
-                if ( $subcat ) {
-                        $translated_sub = BSI_Translations::instance()->get_translation( 'product_cat', $subcat );
+                if ( $sub_cat ) {
+                        $translated_sub = BSI_Translations::instance()->get_translation( 'product_cat', $sub_cat );
                         if ( $translated_sub ) {
-                                $subcat = $translated_sub;
+                                $sub_cat = $translated_sub;
                         }
-                        $cat_ids[] = $this->ensure_term( $subcat, 'product_cat', $category );
+                }
+
+                // Создаём вложенную структуру: макро-категория (родитель) → подкатегория (ребёнок).
+                $cat_ids = array();
+                $macro_id = 0;
+                if ( $macro_cat ) {
+                        $macro_id = $this->ensure_term( $macro_cat, 'product_cat' );
+                        $cat_ids[] = $macro_id;
+                }
+                if ( $sub_cat ) {
+                        // Создаём подкатегорию с макро-категорией как родителем.
+                        $sub_id = $this->ensure_term( $sub_cat, 'product_cat', $macro_cat );
+                        $cat_ids[] = $sub_id;
                 }
                 if ( ! empty( $cat_ids ) ) {
                         wp_set_post_terms( $product_id, array_filter( $cat_ids ), 'product_cat' );
                 }
 
-                // Бренд — ИСПОЛЬЗУЕМ DSLinea (в нём лежит реальный бренд: VERSACE, BENEDETTA BRUZZICHES, LEVI'S).
-                // DSMarca / DSMarcaWeb содержит СТРАНУ производства (ITALY, IT) — НЕ бренд!
+                // Бренд — DSLinea (VERSACE, BENEDETTA BRUZZICHES, LEVI'S).
                 $brand_name = '';
                 if ( ! empty( $row['DSLinea'] ) ) {
                         $brand_name = $row['DSLinea'];
                 } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
                         $brand_name = $row['RaggruppamentoLinea'];
                 }
-
                 if ( $brand_name ) {
-                        // Приоритет: product_brand (если есть плагин Brands), иначе pa_brand.
                         $brand_tax = taxonomy_exists( 'product_brand' ) ? 'product_brand' : 'pa_brand';
                         if ( taxonomy_exists( $brand_tax ) ) {
                                 $brand_id = $this->ensure_term( $brand_name, $brand_tax );
@@ -1400,7 +1419,7 @@ class BSI_Importer {
                         }
                 }
 
-                // Сезон — pa_stagione (например: 26S, 25W, Continuativo).
+                // Сезон.
                 $season_name = '';
                 if ( ! empty( $row['DSStagioneWeb'] ) ) {
                         $season_name = $row['DSStagioneWeb'];
@@ -1412,21 +1431,19 @@ class BSI_Importer {
                         wp_set_post_terms( $product_id, array( $season_id ), 'pa_stagione' );
                 }
 
-                // Страна производства — pa_country (DSMarca = ITALY, CHINA, INDONESIA).
-                // НЕ DSMarcaWeb — там коды (IT, CN, ID).
+                // Страна производства.
                 if ( ! empty( $row['DSMarca'] ) && taxonomy_exists( 'pa_country' ) ) {
                         $country_id = $this->ensure_term( $row['DSMarca'], 'pa_country' );
                         wp_set_post_terms( $product_id, array( $country_id ), 'pa_country' );
                 }
 
-                // Пол — pa_sesso (DONNA/UOMO или WOMAN/MAN).
+                // Пол.
                 $gender_name = '';
                 if ( ! empty( $row['DSSessoWeb'] ) ) {
                         $gender_name = $row['DSSessoWeb'];
                 } elseif ( ! empty( $row['DSSesso'] ) ) {
                         $gender_name = $row['DSSesso'];
                 }
-                // Перевод пола.
                 if ( $gender_name ) {
                         $translated_gender = BSI_Translations::instance()->get_translation( 'pa_sesso', $gender_name );
                         if ( $translated_gender ) {
@@ -1438,7 +1455,7 @@ class BSI_Importer {
                         wp_set_post_terms( $product_id, array( $gender_id ), 'pa_sesso' );
                 }
 
-                // Тип коллекции — pa_collezione (Precollezione, Continuativo, Riassortimento Negozi).
+                // Тип коллекции.
                 if ( ! empty( $row['DSCampionario'] ) && taxonomy_exists( 'pa_collezione' ) ) {
                         $coll_id = $this->ensure_term( $row['DSCampionario'], 'pa_collezione' );
                         wp_set_post_terms( $product_id, array( $coll_id ), 'pa_collezione' );

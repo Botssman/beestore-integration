@@ -13,247 +13,370 @@
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
-	exit;
+        exit;
 }
 
 class BSI_Translations {
 
-	private static $instance = null;
+        private static $instance = null;
 
-	/**
-	 * Какие таксономии поддерживают перевод.
-	 */
-	const SUPPORTED_TAXONOMIES = array(
-		'product_cat' => 'Категории товаров',
-		'pa_sesso'    => 'Пол',
-	);
+        /**
+         * Какие таксономии поддерживают перевод.
+         */
+        const SUPPORTED_TAXONOMIES = array(
+                'product_cat' => 'Категории товаров',
+                'pa_sesso'    => 'Пол',
+        );
 
-	public static function instance() {
-		if ( null === self::$instance ) {
-			self::$instance = new self();
-		}
-		return self::$instance;
-	}
+        /**
+         * Предзаполненный словарь переводов для категорий BeeStore.
+         * Ключ — английское название из BeeStore, значение — русский перевод.
+         * Применяется автоматически при первом импорте, потом можно изменить.
+         */
+        const DEFAULT_TRANSLATIONS_PRODUCT_CAT = array(
+                // Макро-категории (DSRepartoWeb).
+                'CLOTHING'    => 'Одежда',
+                'SHOES'       => 'Обувь',
+                'BAGS'        => 'Сумки',
+                'ACCESSORIES' => 'Аксессуары',
 
-	private function __construct() {
-		// AJAX для сохранения переводов.
-		add_action( 'wp_ajax_bsi_save_translations', array( $this, 'ajax_save_translations' ) );
-	}
+                // Подкатегории — Одежда.
+                'JEANS'              => 'Джинсы',
+                'PANTS'              => 'Брюки',
+                'SHIRTS'             => 'Рубашки',
+                'T-SHIRTS'           => 'Футболки',
+                'POLO'               => 'Поло',
+                'JACKETS'            => 'Куртки',
+                'COATS'              => 'Пальто',
+                'DRESSES'            => 'Платья',
+                'LONG DRESSES'       => 'Длинные платья',
+                'SKIRTS'             => 'Юбки',
+                'SHORTS'             => 'Шорты',
+                'BERMUDA SHORTS'     => 'Бермуды',
+                'BLAZERS AND VESTS'  => 'Пиджаки и жилеты',
+                'SWEATSHIRTS'        => 'Худи',
+                'KNITWEARS'          => 'Трикотаж',
+                'DOWN JACKETS'       => 'Пуховики',
+                'LEATHER JACKETS'    => 'Кожаные куртки',
+                'TRENCH COATS'       => 'Тренчи',
+                'FURS'               => 'Шубы',
+                'JUMPSUITS'          => 'Комбинезоны',
+                'SUITS'              => 'Костюмы',
+                'TAILLEURS'          => 'Женские костюмы',
+                'TOPS'               => 'Топы',
+                'LEGGINGS'           => 'Леггинсы',
+                'SWIMSUITS'          => 'Купальники',
+                'UNDERWEAR'          => 'Нижнее бельё',
+                'SOCKS'              => 'Носки',
+                'BEANIES'            => 'Шапки',
+                'CASA/BAGNO'         => 'Дом/Ванна',
 
-	/**
-	 * Получить ключ опции для таксономии.
-	 *
-	 * @param string $taxonomy
-	 * @return string
-	 */
-	private function get_option_key( $taxonomy ) {
-		return 'bsi_translations_' . $taxonomy;
-	}
+                // Подкатегории — Обувь.
+                'SNEAKERS'           => 'Кроссовки',
+                'BOOTS'              => 'Ботинки',
+                'LOAFERS'            => 'Лоферы',
+                'PUMPS'              => 'Туфли',
+                'SANDALS'            => 'Сандалии',
+                'SLIPPERS'           => 'Тапочки',
+                'ESPADRILLES'        => 'Эспадрильи',
+                'BALLERINAS'         => 'Балетки',
+                'LACE-UP SHOES'      => 'Туфли на шнуровке',
 
-	/**
-	 * Получить все переводы для таксономии.
-	 *
-	 * @param string $taxonomy
-	 * @return array [оригинал => перевод]
-	 */
-	public function get_translations( $taxonomy ) {
-		$translations = get_option( $this->get_option_key( $taxonomy ), array() );
-		return is_array( $translations ) ? $translations : array();
-	}
+                // Подкатегории — Сумки.
+                'HANDBAGS'           => 'Сумки',
+                'BACKPACKS'          => 'Рюкзаки',
+                'BUCKET BAGS'        => 'Сумки-шопперы',
+                'CROSSBODY BAGS'     => 'Сумки через плечо',
+                'CLUTCHES'           => 'Клатчи',
+                'WALLETS'            => 'Кошельки',
+                'TRAVEL BAGS'        => 'Дорожные сумки',
+                'PORTADOCUMENTI'     => 'Портфели',
+                'BRIEFCASES'         => 'Портфели',
+                'POUCH'              => 'Сумочки',
+                'BEAUTY CASES'       => 'Косметички',
+                'VALIGIE'            => 'Чемоданы',
+                'SHOULDER STRAPS'    => 'Наплечные ремни',
 
-	/**
-	 * Получить перевод для конкретного значения.
-	 *
-	 * @param string $taxonomy
-	 * @param string $original Английское название (например 'CLOTHING').
-	 * @return string Перевод (например 'Одежда') или пустая строка.
-	 */
-	public function get_translation( $taxonomy, $original ) {
-		$original = trim( $original );
-		if ( '' === $original ) {
-			return '';
-		}
-		$translations = $this->get_translations( $taxonomy );
-		return isset( $translations[ $original ] ) ? $translations[ $original ] : '';
-	}
+                // Подкатегории — Аксессуары.
+                'BELT'               => 'Ремни',
+                'GLOVES'             => 'Перчатки',
+                'SCARFS AND FOULARDS'=> 'Шарфы и платки',
+                'HATS'               => 'Шляпы',
+                'HATS AND HAIRBANDS' => 'Шляпы и ободки',
+                'SUNGLASSES'         => 'Солнцезащитные очки',
+                'EARRINGS'           => 'Серьги',
+                'NECKLACES'          => 'Ожерелья',
+                'RINGS'              => 'Кольца',
+                'BRACELETS'          => 'Браслеты',
+                'BROOCHES'           => 'Броши',
+                'KEY RINGS'          => 'Брелоки',
+                'TIES AND BOW TIES'  => 'Галстуки и бабочки',
+                'UMBRELLAS'          => 'Зонты',
+                'BEAUTY'             => 'Бьюти',
+                'OBJECTS'            => 'Предметы',
+                'CASES'              => 'Чехлы',
+                'PERFUMES'           => 'Парфюмерия',
 
-	/**
-	 * Сохранить переводы для таксономии (полный массив).
-	 *
-	 * @param string $taxonomy
-	 * @param array  $translations [оригинал => перевод]
-	 */
-	public function save_translations( $taxonomy, $translations ) {
-		$clean = array();
-		if ( is_array( $translations ) ) {
-			foreach ( $translations as $orig => $ru ) {
-				$orig = trim( (string) $orig );
-				$ru   = trim( (string) $ru );
-				if ( '' !== $orig && '' !== $ru ) {
-					$clean[ $orig ] = $ru;
-				}
-			}
-		}
-		update_option( $this->get_option_key( $taxonomy ), $clean, false );
-	}
+                // Прочее.
+                'UOMO'               => 'Мужское',
+        );
 
-	/**
-	 * Применить переводы к существующим термам (переименовать name, не трогать slug).
-	 * Вызывается после сохранения переводов в админке.
-	 *
-	 * @param string $taxonomy
-	 * @return array [updated => N, skipped => M, errors => []]
-	 */
-	public function apply_to_existing_terms( $taxonomy ) {
-		$translations = $this->get_translations( $taxonomy );
-		$updated      = 0;
-		$skipped      = 0;
-		$errors       = array();
+        /**
+         * Предзаполненный словарь для пола.
+         */
+        const DEFAULT_TRANSLATIONS_PA_SESSO = array(
+                'WOMAN' => 'Женский',
+                'MAN'   => 'Мужской',
+                'DONNA' => 'Женский',
+                'UOMO'  => 'Мужской',
+        );
 
-		if ( empty( $translations ) || ! taxonomy_exists( $taxonomy ) ) {
-			return array( 'updated' => 0, 'skipped' => 0, 'errors' => array() );
-		}
+        public static function instance() {
+                if ( null === self::$instance ) {
+                        self::$instance = new self();
+                }
+                return self::$instance;
+        }
 
-		// Получаем все термы таксономии.
-		$terms = get_terms( array(
-			'taxonomy'   => $taxonomy,
-			'hide_empty' => false,
-			'number'     => 0,
-		) );
+        private function __construct() {
+                // AJAX для сохранения переводов.
+                add_action( 'wp_ajax_bsi_save_translations', array( $this, 'ajax_save_translations' ) );
+        }
 
-		if ( is_wp_error( $terms ) ) {
-			return array( 'updated' => 0, 'skipped' => 0, 'errors' => array( $terms->get_error_message() ) );
-		}
+        /**
+         * Получить ключ опции для таксономии.
+         *
+         * @param string $taxonomy
+         * @return string
+         */
+        private function get_option_key( $taxonomy ) {
+                return 'bsi_translations_' . $taxonomy;
+        }
 
-		// Строим обратный индекс: name терма → новый перевод.
-		// Если терм называется "CLOTHING" и в переводе есть "CLOTHING" => "Одежда",
-		// переименуем терм в "Одежда", slug оставляем.
-		foreach ( $terms as $term ) {
-			$original_name_upper = strtoupper( $term->name );
-			// Ищем точное совпадение по имени (case-insensitive).
-			$new_name = '';
-			foreach ( $translations as $orig => $ru ) {
-				if ( 0 === strcasecmp( $orig, $term->name ) ) {
-					$new_name = $ru;
-					break;
-				}
-			}
+        /**
+         * Получить все переводы для таксономии.
+         *
+         * @param string $taxonomy
+         * @return array [оригинал => перевод]
+         */
+        public function get_translations( $taxonomy ) {
+                $translations = get_option( $this->get_option_key( $taxonomy ), array() );
+                return is_array( $translations ) ? $translations : array();
+        }
 
-			if ( empty( $new_name ) ) {
-				$skipped++;
-				continue;
-			}
+        /**
+         * Получить перевод для конкретного значения.
+         *
+         * Сначала проверяет пользовательские переводы (сохранённые в БД),
+         * потом — предзаполненный словарь.
+         *
+         * @param string $taxonomy
+         * @param string $original Английское название (например 'CLOTHING').
+         * @return string Перевод (например 'Одежда') или пустая строка.
+         */
+        public function get_translation( $taxonomy, $original ) {
+                $original = trim( $original );
+                if ( '' === $original ) {
+                        return '';
+                }
 
-			// Если уже переведён — пропускаем.
-			if ( $term->name === $new_name ) {
-				$skipped++;
-				continue;
-			}
+                // 1. Проверяем пользовательские переводы (из БД).
+                $translations = $this->get_translations( $taxonomy );
+                if ( isset( $translations[ $original ] ) ) {
+                        return $translations[ $original ];
+                }
 
-			// Переименуем (slug не трогаем).
-			$result = wp_update_term( $term->term_id, $taxonomy, array(
-				'name' => $new_name,
-				'slug' => $term->slug, // явно сохраняем slug
-			) );
+                // 2. Проверяем предзаполненный словарь.
+                if ( 'product_cat' === $taxonomy ) {
+                        if ( isset( self::DEFAULT_TRANSLATIONS_PRODUCT_CAT[ $original ] ) ) {
+                                return self::DEFAULT_TRANSLATIONS_PRODUCT_CAT[ $original ];
+                        }
+                } elseif ( 'pa_sesso' === $taxonomy ) {
+                        if ( isset( self::DEFAULT_TRANSLATIONS_PA_SESSO[ $original ] ) ) {
+                                return self::DEFAULT_TRANSLATIONS_PA_SESSO[ $original ];
+                        }
+                }
 
-			if ( is_wp_error( $result ) ) {
-				$errors[] = sprintf( '%s: %s', $term->name, $result->get_error_message() );
-			} else {
-				$updated++;
-			}
-		}
+                return '';
+        }
 
-		return array(
-			'updated' => $updated,
-			'skipped' => $skipped,
-			'errors'  => $errors,
-		);
-	}
+        /**
+         * Сохранить переводы для таксономии (полный массив).
+         *
+         * @param string $taxonomy
+         * @param array  $translations [оригинал => перевод]
+         */
+        public function save_translations( $taxonomy, $translations ) {
+                $clean = array();
+                if ( is_array( $translations ) ) {
+                        foreach ( $translations as $orig => $ru ) {
+                                $orig = trim( (string) $orig );
+                                $ru   = trim( (string) $ru );
+                                if ( '' !== $orig && '' !== $ru ) {
+                                        $clean[ $orig ] = $ru;
+                                }
+                        }
+                }
+                update_option( $this->get_option_key( $taxonomy ), $clean, false );
+        }
 
-	/**
-	 * AJAX: сохранить переводы из админки.
-	 */
-	public function ajax_save_translations() {
-		check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
-		if ( ! current_user_can( 'manage_woocommerce' ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
-		}
+        /**
+         * Применить переводы к существующим термам (переименовать name, не трогать slug).
+         * Вызывается после сохранения переводов в админке.
+         *
+         * @param string $taxonomy
+         * @return array [updated => N, skipped => M, errors => []]
+         */
+        public function apply_to_existing_terms( $taxonomy ) {
+                $translations = $this->get_translations( $taxonomy );
+                $updated      = 0;
+                $skipped      = 0;
+                $errors       = array();
 
-		$taxonomy = isset( $_POST['taxonomy'] ) ? sanitize_text_field( wp_unslash( $_POST['taxonomy'] ) ) : '';
-		$translations_raw = isset( $_POST['translations'] ) ? wp_unslash( $_POST['translations'] ) : array();
+                if ( empty( $translations ) || ! taxonomy_exists( $taxonomy ) ) {
+                        return array( 'updated' => 0, 'skipped' => 0, 'errors' => array() );
+                }
 
-		if ( ! isset( self::SUPPORTED_TAXONOMIES[ $taxonomy ] ) ) {
-			wp_send_json_error( array( 'message' => __( 'Неподдерживаемая таксономия.', 'beestore-integration' ) ) );
-		}
+                // Получаем все термы таксономии.
+                $terms = get_terms( array(
+                        'taxonomy'   => $taxonomy,
+                        'hide_empty' => false,
+                        'number'     => 0,
+                ) );
 
-		// Санитизация.
-		$translations = array();
-		if ( is_array( $translations_raw ) ) {
-			foreach ( $translations_raw as $orig => $ru ) {
-				$orig = sanitize_text_field( $orig );
-				$ru   = sanitize_text_field( $ru );
-				if ( '' !== $orig && '' !== $ru ) {
-					$translations[ $orig ] = $ru;
-				}
-			}
-		}
+                if ( is_wp_error( $terms ) ) {
+                        return array( 'updated' => 0, 'skipped' => 0, 'errors' => array( $terms->get_error_message() ) );
+                }
 
-		// Сохраняем в БД.
-		$this->save_translations( $taxonomy, $translations );
+                // Строим обратный индекс: name терма → новый перевод.
+                // Если терм называется "CLOTHING" и в переводе есть "CLOTHING" => "Одежда",
+                // переименуем терм в "Одежда", slug оставляем.
+                foreach ( $terms as $term ) {
+                        $original_name_upper = strtoupper( $term->name );
+                        // Ищем точное совпадение по имени (case-insensitive).
+                        $new_name = '';
+                        foreach ( $translations as $orig => $ru ) {
+                                if ( 0 === strcasecmp( $orig, $term->name ) ) {
+                                        $new_name = $ru;
+                                        break;
+                                }
+                        }
 
-		// Применяем к существующим термам (переименовываем name, slug не трогаем).
-		$apply_result = $this->apply_to_existing_terms( $taxonomy );
+                        if ( empty( $new_name ) ) {
+                                $skipped++;
+                                continue;
+                        }
 
-		BSI_Logger::instance()->info( 'translations', 'Сохранены переводы', array(
-			'taxonomy' => $taxonomy,
-			'count'    => count( $translations ),
-			'updated'  => $apply_result['updated'],
-			'skipped'  => $apply_result['skipped'],
-			'errors'   => $apply_result['errors'],
-		) );
+                        // Если уже переведён — пропускаем.
+                        if ( $term->name === $new_name ) {
+                                $skipped++;
+                                continue;
+                        }
 
-		wp_send_json_success( array(
-			'message' => sprintf(
-				/* translators: 1: кол-во переводов, 2: кол-во обновлённых термов */
-				__( 'Сохранено переводов: %1$d. Обновлено категорий: %2$d.', 'beestore-integration' ),
-				count( $translations ),
-				$apply_result['updated']
-			),
-			'apply_result' => $apply_result,
-		) );
-	}
+                        // Переименуем (slug не трогаем).
+                        $result = wp_update_term( $term->term_id, $taxonomy, array(
+                                'name' => $new_name,
+                                'slug' => $term->slug, // явно сохраняем slug
+                        ) );
 
-	/**
-	 * Получить список всех уникальных значений для таксономии из всех товаров BeeStore.
-	 * Используется в админке, чтобы показать какие категории уже есть.
-	 *
-	 * @param string $taxonomy
-	 * @return array [name => term_id]
-	 */
-	public function get_existing_terms( $taxonomy ) {
-		if ( ! taxonomy_exists( $taxonomy ) ) {
-			return array();
-		}
+                        if ( is_wp_error( $result ) ) {
+                                $errors[] = sprintf( '%s: %s', $term->name, $result->get_error_message() );
+                        } else {
+                                $updated++;
+                        }
+                }
 
-		$terms = get_terms( array(
-			'taxonomy'   => $taxonomy,
-			'hide_empty' => false,
-			'number'     => 0,
-		) );
+                return array(
+                        'updated' => $updated,
+                        'skipped' => $skipped,
+                        'errors'  => $errors,
+                );
+        }
 
-		if ( is_wp_error( $terms ) || empty( $terms ) ) {
-			return array();
-		}
+        /**
+         * AJAX: сохранить переводы из админки.
+         */
+        public function ajax_save_translations() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
 
-		$result = array();
-		foreach ( $terms as $term ) {
-			$result[ $term->name ] = array(
-				'term_id'    => $term->term_id,
-				'slug'       => $term->slug,
-				'count'      => $term->count,
-				'current_name' => $term->name,
-			);
-		}
-		return $result;
-	}
+                $taxonomy = isset( $_POST['taxonomy'] ) ? sanitize_text_field( wp_unslash( $_POST['taxonomy'] ) ) : '';
+                $translations_raw = isset( $_POST['translations'] ) ? wp_unslash( $_POST['translations'] ) : array();
+
+                if ( ! isset( self::SUPPORTED_TAXONOMIES[ $taxonomy ] ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Неподдерживаемая таксономия.', 'beestore-integration' ) ) );
+                }
+
+                // Санитизация.
+                $translations = array();
+                if ( is_array( $translations_raw ) ) {
+                        foreach ( $translations_raw as $orig => $ru ) {
+                                $orig = sanitize_text_field( $orig );
+                                $ru   = sanitize_text_field( $ru );
+                                if ( '' !== $orig && '' !== $ru ) {
+                                        $translations[ $orig ] = $ru;
+                                }
+                        }
+                }
+
+                // Сохраняем в БД.
+                $this->save_translations( $taxonomy, $translations );
+
+                // Применяем к существующим термам (переименовываем name, slug не трогаем).
+                $apply_result = $this->apply_to_existing_terms( $taxonomy );
+
+                BSI_Logger::instance()->info( 'translations', 'Сохранены переводы', array(
+                        'taxonomy' => $taxonomy,
+                        'count'    => count( $translations ),
+                        'updated'  => $apply_result['updated'],
+                        'skipped'  => $apply_result['skipped'],
+                        'errors'   => $apply_result['errors'],
+                ) );
+
+                wp_send_json_success( array(
+                        'message' => sprintf(
+                                /* translators: 1: кол-во переводов, 2: кол-во обновлённых термов */
+                                __( 'Сохранено переводов: %1$d. Обновлено категорий: %2$d.', 'beestore-integration' ),
+                                count( $translations ),
+                                $apply_result['updated']
+                        ),
+                        'apply_result' => $apply_result,
+                ) );
+        }
+
+        /**
+         * Получить список всех уникальных значений для таксономии из всех товаров BeeStore.
+         * Используется в админке, чтобы показать какие категории уже есть.
+         *
+         * @param string $taxonomy
+         * @return array [name => term_id]
+         */
+        public function get_existing_terms( $taxonomy ) {
+                if ( ! taxonomy_exists( $taxonomy ) ) {
+                        return array();
+                }
+
+                $terms = get_terms( array(
+                        'taxonomy'   => $taxonomy,
+                        'hide_empty' => false,
+                        'number'     => 0,
+                ) );
+
+                if ( is_wp_error( $terms ) || empty( $terms ) ) {
+                        return array();
+                }
+
+                $result = array();
+                foreach ( $terms as $term ) {
+                        $result[ $term->name ] = array(
+                                'term_id'    => $term->term_id,
+                                'slug'       => $term->slug,
+                                'count'      => $term->count,
+                                'current_name' => $term->name,
+                        );
+                }
+                return $result;
+        }
 }

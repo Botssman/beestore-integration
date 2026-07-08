@@ -471,7 +471,7 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                                                 <?php esc_html_e( 'В авто-режиме курс обновляется автоматически каждый день в 06:00. Также можно обновить вручную кнопкой ниже.', 'beestore-integration' ); ?>
                                                         </p>
                                                         <button type="button" class="button button-secondary" id="bsi-refresh-rate">
-                                                                <span class="dashicons dashicons-update" style="vertical-align:middle;margin-top:3px;"></span>
+                                                                <span class="dashicons dashicons-update"></span>
                                                                 <?php esc_html_e( 'Обновить курс сейчас', 'beestore-integration' ); ?>
                                                         </button>
                                                         <span id="bsi-refresh-status" style="margin-left:10px;"></span>

@@ -92,7 +92,7 @@ $supported_taxonomies = BSI_Translations::SUPPORTED_TAXONOMIES;
 
 			<p style="margin-top:15px;">
 				<button type="button" class="button button-primary button-large" id="bsi-save-translations">
-					<span class="dashicons dashicons-translation" style="vertical-align:middle;margin-top:3px;"></span>
+					<span class="dashicons dashicons-translation"></span>
 					<?php esc_html_e( 'Сохранить переводы', 'beestore-integration' ); ?>
 				</button>
 				<span id="bsi-translations-status" style="margin-left:10px;"></span>

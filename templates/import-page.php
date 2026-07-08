@@ -115,22 +115,22 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                         <!-- Кнопки управления -->
                         <p style="margin-top:15px;">
                                 <button type="button" class="button button-primary" id="bsi-btn-start" <?php echo 'running' === $state['status'] ? 'disabled' : ''; ?>>
-                                        <span class="dashicons dashicons-controls-play" style="vertical-align:middle;margin-top:3px;"></span>
+                                        <span class="dashicons dashicons-controls-play"></span>
                                         <?php esc_html_e( 'Начать импорт', 'beestore-integration' ); ?>
                                 </button>
 
                                 <button type="button" class="button button-primary" id="bsi-btn-continue" <?php echo ( 'paused' === $state['status'] || 'error' === $state['status'] ) ? '' : 'disabled'; ?>>
-                                        <span class="dashicons dashicons-controls-play" style="vertical-align:middle;margin-top:3px;"></span>
+                                        <span class="dashicons dashicons-controls-play"></span>
                                         <?php esc_html_e( 'Продолжить', 'beestore-integration' ); ?>
                                 </button>
 
                                 <button type="button" class="button button-secondary" id="bsi-btn-pause" <?php echo 'running' === $state['status'] ? '' : 'disabled'; ?>>
-                                        <span class="dashicons dashicons-controls-pause" style="vertical-align:middle;margin-top:3px;"></span>
+                                        <span class="dashicons dashicons-controls-pause"></span>
                                         <?php esc_html_e( 'Пауза', 'beestore-integration' ); ?>
                                 </button>
 
                                 <button type="button" class="button button-link-delete" id="bsi-btn-stop" <?php echo 'idle' === $state['status'] ? 'disabled' : ''; ?> onclick="return confirm('<?php esc_attr_e( 'Остановить импорт и сбросить прогресс?', 'beestore-integration' ); ?>')">
-                                        <span class="dashicons dashicons-no-alt" style="vertical-align:middle;margin-top:3px;"></span>
+                                        <span class="dashicons dashicons-no-alt"></span>
                                         <?php esc_html_e( 'Остановить и сбросить', 'beestore-integration' ); ?>
                                 </button>
                         </p>
@@ -164,7 +164,7 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                 </p>
                 <p>
                         <button type="button" class="button button-secondary" id="bsi-backfill-images">
-                                <span class="dashicons dashicons-images-alt2" style="vertical-align:middle;margin-top:3px;"></span>
+                                <span class="dashicons dashicons-images-alt2"></span>
                                 <?php esc_html_e( 'Докачать картинки', 'beestore-integration' ); ?>
                         </button>
                         <span id="bsi-backfill-status" style="margin-left:10px;"></span>
@@ -190,7 +190,7 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                 </p>
                 <p>
                         <button type="button" class="button button-link-delete" id="bsi-purge-all" onclick="return confirm('<?php esc_attr_e( 'Удалить ВСЕ товары BeeStore и атрибуты? Это необратимо!', 'beestore-integration' ); ?>')">
-                                <span class="dashicons dashicons-trash" style="vertical-align:middle;margin-top:3px;"></span>
+                                <span class="dashicons dashicons-trash"></span>
                                 <?php esc_html_e( 'Удалить все товары и атрибуты BeeStore', 'beestore-integration' ); ?>
                         </button>
                         <span id="bsi-purge-status" style="margin-left:10px;"></span>

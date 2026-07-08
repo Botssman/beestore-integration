@@ -62,7 +62,7 @@ $settings = get_option( 'bsi_settings', array() );
 								<td><?php echo esc_html( $size ); ?></td>
 								<td>
 									<a href="<?php echo esc_url( $download_url ); ?>" class="button button-primary">
-										<span class="dashicons dashicons-download" style="vertical-align:middle;margin-top:3px;"></span>
+										<span class="dashicons dashicons-download"></span>
 										<?php esc_html_e( 'Скачать на компьютер', 'beestore-integration' ); ?>
 									</a>
 									<a href="<?php echo esc_url( $delete_url ); ?>" class="button button-link-delete" onclick="return confirm('<?php esc_attr_e( 'Удалить файл с сервера?', 'beestore-integration' ); ?>')">
@@ -81,7 +81,7 @@ $settings = get_option( 'bsi_settings', array() );
 			<h2>
 				<?php esc_html_e( '📋 Файлы на FTP Sirio', 'beestore-integration' ); ?>
 				<span class="button button-secondary button-small" style="margin-left:10px;" onclick="location.reload()">
-					<span class="dashicons dashicons-update" style="vertical-align:middle;margin-top:3px;"></span>
+					<span class="dashicons dashicons-update"></span>
 					<?php esc_html_e( 'Обновить', 'beestore-integration' ); ?>
 				</span>
 			</h2>
@@ -141,7 +141,7 @@ $settings = get_option( 'bsi_settings', array() );
 								</td>
 								<td>
 									<a href="<?php echo esc_url( $fetch_url ); ?>" class="button button-secondary button-small">
-										<span class="dashicons dashicons-download" style="vertical-align:middle;margin-top:3px;font-size:14px;width:14px;height:14px;"></span>
+										<span class="dashicons dashicons-download" class="bsi-small-icon"></span>
 										<?php esc_html_e( 'Скачать на сервер', 'beestore-integration' ); ?>
 									</a>
 								</td>

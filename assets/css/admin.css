@@ -4,9 +4,28 @@
 .button .dashicons,
 .button-secondary .dashicons,
 .button-primary .dashicons,
-.button-link-delete .dashicons {
-        vertical-align: middle;
-        margin-top: 3px;
+.button-link-delete .dashicons,
+.button-large .dashicons {
+        vertical-align: middle !important;
+        margin-top: -2px !important;
+        margin-right: 2px;
+        position: relative;
+        top: 1px;
+}
+
+/* Для крупных кнопок чуть больше отступ */
+.button-large .dashicons {
+        margin-top: -1px !important;
+        top: 2px;
+}
+
+/* Маленькая иконка в кнопке small */
+.bsi-small-icon {
+        font-size: 14px !important;
+        width: 14px !important;
+        height: 14px !important;
+        vertical-align: middle !important;
+        margin-top: -2px !important;
 }
 
 .bsi-card {

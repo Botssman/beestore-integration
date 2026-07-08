@@ -13,6 +13,19 @@
         top: 1px;
 }
 
+/* Нормальный line-height для кнопок BeeStore (тема может ставить 1.9 — иконка съезжает) */
+.bsi-card .button,
+.bsi-card .button-secondary,
+.bsi-card .button-primary,
+.bsi-card .button-link-delete,
+.bsi-card .button-large {
+        line-height: 1.4 !important;
+        height: auto !important;
+        min-height: 30px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+}
+
 /* Для крупных кнопок чуть больше отступ */
 .button-large .dashicons {
         margin-top: -1px !important;

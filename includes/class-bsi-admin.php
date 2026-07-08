@@ -57,6 +57,15 @@ class BSI_Admin {
 
                 add_submenu_page(
                         'beestore-integration',
+                        __( 'Фильтры импорта', 'beestore-integration' ),
+                        __( 'Фильтры импорта', 'beestore-integration' ),
+                        $cap,
+                        'bsi-filters',
+                        array( $this, 'render_filters_page' )
+                );
+
+                add_submenu_page(
+                        'beestore-integration',
                         __( 'Логи', 'beestore-integration' ),
                         __( 'Логи', 'beestore-integration' ),
                         $cap,
@@ -431,5 +440,39 @@ class BSI_Admin {
                 $saved_translations = $tr->get_translations( $current_tax );
 
                 include BSI_PLUGIN_DIR . 'templates/translations-page.php';
+        }
+
+        /* ---------------------------------------------------------------------
+         * Страница «Фильтры импорта» — выбор категорий и брендов с лимитами.
+         * --------------------------------------------------------------------- */
+        public function render_filters_page() {
+                $filters = BSI_Import_Filters::instance()->get_settings();
+
+                // Проверяем, есть ли уже скачанный CSV для сканирования.
+                $upload_dir = wp_upload_dir();
+                $state = BSI_Importer::instance()->get_import_state();
+                $csv_file = '';
+                if ( ! empty( $state['csv_file'] ) && file_exists( $state['csv_file'] ) ) {
+                        $csv_file = $state['csv_file'];
+                } else {
+                        // Ищем последний скачанный CSV.
+                        $downloads_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/downloads';
+                        $extracted_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/extracted';
+                        $csvs = glob( $downloads_dir . '/*.csv' );
+                        if ( empty( $csvs ) && is_dir( $extracted_dir ) ) {
+                                $csvs = glob( $extracted_dir . '/*/*.csv' );
+                        }
+                        if ( ! empty( $csvs ) ) {
+                                $csv_file = $csvs[0];
+                        }
+                }
+
+                // Если есть CSV — сканируем его для получения списка категорий и брендов.
+                $available = array( 'categories' => array(), 'brands' => array() );
+                if ( $csv_file ) {
+                        $available = BSI_Import_Filters::instance()->scan_csv_for_filters( $csv_file );
+                }
+
+                include BSI_PLUGIN_DIR . 'templates/filters-page.php';
         }
 }

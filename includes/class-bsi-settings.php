@@ -179,6 +179,40 @@ class BSI_Settings {
                         $output['markup_coefficient'] = 1;
                 }
 
+                // WebP конвертация.
+                $output['webp_enabled']  = isset( $input['webp_enabled'] ) ? '1' : '0';
+                $output['webp_strategy'] = isset( $input['webp_strategy'] ) ? max( 1, min( 5, absint( $input['webp_strategy'] ) ) ) : 3;
+
+                // Фильтры импорта.
+                $output['import_filter_mode'] = isset( $input['import_filter_mode'] ) ? sanitize_text_field( $input['import_filter_mode'] ) : 'all';
+                if ( ! in_array( $output['import_filter_mode'], array( 'all', 'whitelist', 'blacklist' ), true ) ) {
+                        $output['import_filter_mode'] = 'all';
+                }
+
+                // Фильтр категорий: [category_name => limit].
+                $output['import_filter_categories'] = array();
+                if ( isset( $input['import_filter_categories'] ) && is_array( $input['import_filter_categories'] ) ) {
+                        foreach ( $input['import_filter_categories'] as $cat_name => $limit ) {
+                                $cat_name = sanitize_text_field( $cat_name );
+                                $limit    = '' === $limit ? 0 : absint( $limit );
+                                if ( $cat_name ) {
+                                        $output['import_filter_categories'][ $cat_name ] = $limit;
+                                }
+                        }
+                }
+
+                // Фильтр брендов: [brand_name => limit].
+                $output['import_filter_brands'] = array();
+                if ( isset( $input['import_filter_brands'] ) && is_array( $input['import_filter_brands'] ) ) {
+                        foreach ( $input['import_filter_brands'] as $brand_name => $limit ) {
+                                $brand_name = sanitize_text_field( $brand_name );
+                                $limit      = '' === $limit ? 0 : absint( $limit );
+                                if ( $brand_name ) {
+                                        $output['import_filter_brands'][ $brand_name ] = $limit;
+                                }
+                        }
+                }
+
                 return $output;
         }
 

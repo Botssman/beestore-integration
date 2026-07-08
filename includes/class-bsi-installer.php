@@ -61,6 +61,13 @@ class BSI_Installer {
                                 'supplier_currency'       => 'EUR', // Валюта поставщика (BeeStore).
                                 'shop_currency'           => 'RUB', // Валюта магазина (WooCommerce).
                                 'round_prices'            => '0',  // Округлять цены до целых.
+                                // WebP конвертация.
+                                'webp_enabled'            => '0',  // Конвертировать картинки в WebP.
+                                'webp_strategy'           => 3,    // 1-5 (3 = сбалансированно).
+                                // Фильтры импорта.
+                                'import_filter_mode'      => 'all', // all | whitelist | blacklist
+                                'import_filter_categories' => array(), // [category_name => limit]
+                                'import_filter_brands'    => array(), // [brand_name => limit]
                         );
                         update_option( 'bsi_settings', $defaults );
                 }

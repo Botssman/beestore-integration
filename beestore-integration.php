@@ -106,6 +106,8 @@ add_action(
                 BSI_Status_Sync::instance();
                 BSI_Currency::instance();
                 BSI_Translations::instance();
+                BSI_WebP::instance();
+                BSI_Import_Filters::instance();
                 BSI_Admin::instance();
                 BSI_Cron::instance();
         }

@@ -165,6 +165,9 @@ class BSI_Importer {
                         'single_variant'  => count( $index ) - $multi_variant_count,
                 ) );
 
+                // Сбрасываем счётчики фильтров (лимиты категорий/брендов).
+                BSI_Import_Filters::instance()->reset_counters();
+
                 // Сохраняем состояние.
                 $new_state = array(
                         'status'          => 'running',
@@ -320,8 +323,30 @@ class BSI_Importer {
                 }
 
                 // Импортируем каждую модель.
+                $skipped_by_filter = 0;
                 foreach ( $models_in_batch as $igu => $data ) {
                         try {
+                                // Получаем категорию и бренд из строки для проверки фильтром.
+                                $row = $data['parent'];
+                                $category = '';
+                                if ( ! empty( $row['DSCategoriaMerceologicaWeb'] ) ) {
+                                        $category = $row['DSCategoriaMerceologicaWeb'];
+                                } elseif ( ! empty( $row['DSCategoriaMerceologica'] ) ) {
+                                        $category = $row['DSCategoriaMerceologica'];
+                                }
+                                $brand = '';
+                                if ( ! empty( $row['DSLinea'] ) ) {
+                                        $brand = $row['DSLinea'];
+                                } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
+                                        $brand = $row['RaggruppamentoLinea'];
+                                }
+
+                                // Проверяем фильтром.
+                                if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand ) ) {
+                                        $skipped_by_filter++;
+                                        continue;
+                                }
+
                                 // Определяем, многовариантный ли это товар ВО ВСЁМ ФАЙЛЕ (не в батче!).
                                 $total_count = isset( $index[ $igu ] ) ? $index[ $igu ] : count( $data['variants'] );
                                 $is_multi_variant = $total_count > 1;
@@ -329,6 +354,10 @@ class BSI_Importer {
                                 // Проверяем, новый ли товар (по meta).
                                 $existing_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu );
                                 $this->upsert_model( $igu, $data['parent'], $data['variants'], $is_multi_variant );
+
+                                // Увеличиваем счётчики фильтров (для лимитов).
+                                BSI_Import_Filters::instance()->increment_counters( $category, $brand );
+
                                 if ( $existing_id ) {
                                         $updated++;
                                 } else {
@@ -1480,7 +1509,86 @@ class BSI_Importer {
                 }
 
                 update_post_meta( $attach_id, '_bsi_image_url', $url );
+
+                // Конвертация в WebP (если включена).
+                $settings = get_option( 'bsi_settings', array() );
+                $webp_enabled = isset( $settings['webp_enabled'] ) && '1' === $settings['webp_enabled'];
+
+                if ( $webp_enabled ) {
+                        $this->convert_attachment_to_webp( $attach_id );
+                }
+
                 return $attach_id;
+        }
+
+        /**
+         * Конвертировать attachment в WebP.
+         *
+         * После конвертации:
+         *   - В Media Library остаётся только WebP
+         *   - Оригинальный JPG/PNG удаляется
+         *   - MIME-тип attachment меняется на image/webp
+         *
+         * @param int $attachment_id
+         * @return bool true — успешно, false — пропущено или ошибка.
+         */
+        private function convert_attachment_to_webp( $attachment_id ) {
+                $file = get_attached_file( $attachment_id );
+                if ( ! $file || ! file_exists( $file ) ) {
+                        return false;
+                }
+
+                $mime = get_post_mime_type( $attachment_id );
+                if ( 'image/webp' === $mime ) {
+                        return true; // Уже WebP.
+                }
+
+                if ( ! in_array( $mime, array( 'image/jpeg', 'image/png' ), true ) ) {
+                        return false; // Не JPEG/PNG.
+                }
+
+                $settings = get_option( 'bsi_settings', array() );
+                $strategy = isset( $settings['webp_strategy'] ) ? (int) $settings['webp_strategy'] : 3;
+
+                $result = BSI_WebP::instance()->convert( $file, null, $strategy );
+
+                if ( is_wp_error( $result ) ) {
+                        $this->log( 'warning', 'WebP конвертация не удалась', array(
+                                'file'  => basename( $file ),
+                                'error' => $result->get_error_message(),
+                        ) );
+                        return false;
+                }
+
+                // Удаляем оригинальный файл.
+                wp_delete_file( $file );
+
+                // Обновляем путь attachment на WebP.
+                update_attached_file( $attachment_id, $result['path'] );
+
+                // Меняем MIME-тип на image/webp.
+                wp_update_post( array(
+                        'ID'             => $attachment_id,
+                        'post_mime_type' => 'image/webp',
+                ) );
+
+                // Перегенерируем метаданные (миниатюры и т.д.).
+                require_once ABSPATH . 'wp-admin/includes/image.php';
+                $new_meta = wp_generate_attachment_metadata( $attachment_id, $result['path'] );
+                if ( is_array( $new_meta ) ) {
+                        wp_update_attachment_metadata( $attachment_id, $new_meta );
+                }
+
+                clean_attachment_cache( $attachment_id );
+
+                $this->log( 'info', 'Картинка конвертирована в WebP', array(
+                        'file'          => basename( $result['path'] ),
+                        'original_size' => size_format( $result['original_size'] ),
+                        'webp_size'     => size_format( $result['filesize'] ),
+                        'saved_percent' => $result['saved_percent'] . '%',
+                ) );
+
+                return true;
         }
 
         /**

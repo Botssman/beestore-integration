@@ -103,7 +103,11 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                                 <p class="description">
                                         <?php esc_html_e( 'Лимит = максимальное количество РОДИТЕЛЬСКИХ товаров (карточек). 0 = без лимита.', 'beestore-integration' ); ?>
                                 </p>
-                                <table class="widefat striped">
+                                <p style="margin-bottom:10px;">
+                                        <button type="button" class="button button-small bsi-select-all" data-target="bsi-macro-table"><?php esc_html_e( 'Выбрать все', 'beestore-integration' ); ?></button>
+                                        <button type="button" class="button button-small bsi-deselect-all" data-target="bsi-macro-table"><?php esc_html_e( 'Снять выделение', 'beestore-integration' ); ?></button>
+                                </p>
+                                <table class="widefat striped" id="bsi-macro-table">
                                         <thead>
                                                 <tr>
                                                         <th style="width:30px;"><?php esc_html_e( '✓', 'beestore-integration' ); ?></th>
@@ -141,8 +145,12 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                                 <p class="description">
                                         <?php esc_html_e( 'Лимит = максимальное количество РОДИТЕЛЬСКИХ товаров (карточек). 0 = без лимита.', 'beestore-integration' ); ?>
                                 </p>
+                                <p style="margin-bottom:10px;">
+                                        <button type="button" class="button button-small bsi-select-all" data-target="bsi-sub-table"><?php esc_html_e( 'Выбрать все', 'beestore-integration' ); ?></button>
+                                        <button type="button" class="button button-small bsi-deselect-all" data-target="bsi-sub-table"><?php esc_html_e( 'Снять выделение', 'beestore-integration' ); ?></button>
+                                </p>
                                 <div style="max-height:500px;overflow-y:auto;">
-                                <table class="widefat striped">
+                                <table class="widefat striped" id="bsi-sub-table">
                                         <thead>
                                                 <tr>
                                                         <th style="width:30px;"><?php esc_html_e( '✓', 'beestore-integration' ); ?></th>
@@ -183,8 +191,12 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                                 <p class="description">
                                         <?php esc_html_e( 'Лимит = максимальное количество РОДИТЕЛЬСКИХ товаров (карточек). 0 = без лимита.', 'beestore-integration' ); ?>
                                 </p>
+                                <p style="margin-bottom:10px;">
+                                        <button type="button" class="button button-small bsi-select-all" data-target="bsi-brand-table"><?php esc_html_e( 'Выбрать все', 'beestore-integration' ); ?></button>
+                                        <button type="button" class="button button-small bsi-deselect-all" data-target="bsi-brand-table"><?php esc_html_e( 'Снять выделение', 'beestore-integration' ); ?></button>
+                                </p>
                                 <div style="max-height:500px;overflow-y:auto;">
-                                <table class="widefat striped">
+                                <table class="widefat striped" id="bsi-brand-table">
                                         <thead>
                                                 <tr>
                                                         <th style="width:30px;"><?php esc_html_e( '✓', 'beestore-integration' ); ?></th>
@@ -292,11 +304,10 @@ jQuery(document).ready(function($){
                 $btn.prop('disabled', true);
                 $status.html('<span class="bsi-spinner"></span> Скачивание CSV с FTP (может занять 3-5 минут для файла 66 MB)...');
 
-                // Длинный таймаут для большого файла.
                 $.ajax({
                         url: bsiAdmin.ajaxUrl,
                         type: 'POST',
-                        timeout: 600000, // 10 минут.
+                        timeout: 600000,
                         data: {
                                 action: 'bsi_download_csv_for_filters',
                                 nonce: bsiAdmin.nonce
@@ -306,10 +317,7 @@ jQuery(document).ready(function($){
                                 if (response && response.success) {
                                         var msg = (response.data && response.data.message) ? response.data.message : 'CSV скачан.';
                                         $status.html('<span style="color:#2e7d32;">✓ ' + msg + '</span>');
-                                        // Перезагружаем страницу.
-                                        setTimeout(function() {
-                                                location.reload();
-                                        }, 2000);
+                                        setTimeout(function() { location.reload(); }, 2000);
                                 } else {
                                         var errMsg = (response && response.data && response.data.message) ? response.data.message : 'Неизвестная ошибка';
                                         $status.html('<span style="color:#c62828;">✗ ' + errMsg + '</span>');
@@ -318,17 +326,23 @@ jQuery(document).ready(function($){
                         error: function(xhr, status) {
                                 $btn.prop('disabled', false);
                                 if (status === 'timeout') {
-                                        $status.html('<span style="color:#c62828;">✗ Превышено время ожидания (10 мин). Возможно, FTP медленный. Попробуйте ещё раз — если CSV уже скачался частично, плагин найдёт его при следующей попытке.</span>');
+                                        $status.html('<span style="color:#c62828;">✗ Превышено время ожидания (10 мин). Попробуйте ещё раз.</span>');
                                 } else {
-                                        // Проверим — может PHP вернул 500, но CSV всё-таки скачался.
-                                        $status.html('<span style="color:#f57c00;">⚠ Ошибка сервера. Проверим, скачался ли CSV...</span>');
-                                        // Через 3 секунды перезагружаем страницу — если CSV скачался, списки появятся.
-                                        setTimeout(function() {
-                                                location.reload();
-                                        }, 3000);
+                                        $status.html('<span style="color:#f57c00;">⚠ Ошибка сервера. Перезагрузка...</span>');
+                                        setTimeout(function() { location.reload(); }, 3000);
                                 }
                         }
                 });
+        });
+
+        // Кнопки "Выбрать все" и "Снять выделение".
+        $('.bsi-select-all').on('click', function() {
+                var target = $(this).data('target');
+                $('#' + target + ' input[type="checkbox"]').prop('checked', true);
+        });
+        $('.bsi-deselect-all').on('click', function() {
+                var target = $(this).data('target');
+                $('#' + target + ' input[type="checkbox"]').prop('checked', false);
         });
 });
 </script>

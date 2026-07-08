@@ -117,13 +117,13 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                                                         <?php $is_selected = isset( $filter_cats[ $cat_name ] ); ?>
                                                         <tr>
                                                                 <td>
-                                                                        <input type="checkbox" name="bsi_settings[import_filter_categories][<?php echo esc_attr( $cat_name ); ?>]" value="<?php echo esc_attr( $is_selected ? $filter_cats[ $cat_name ] : '0' ); ?>" <?php checked( $is_selected ); ?>>
+                                                                        <input type="checkbox" name="bsi_settings[filter_cat_check][<?php echo esc_attr( $cat_name ); ?>]" value="1" <?php checked( $is_selected ); ?>>
                                                                 </td>
                                                                 <td><strong><?php echo esc_html( $cat_name ); ?></strong></td>
                                                                 <td><code><?php echo esc_html( $count ); ?></code></td>
                                                                 <td>
                                                                         <input type="number" min="0" style="width:80px;"
-                                                                                name="bsi_settings[import_filter_categories][<?php echo esc_attr( $cat_name ); ?>]"
+                                                                                name="bsi_settings[filter_cat_limit][<?php echo esc_attr( $cat_name ); ?>]"
                                                                                 value="<?php echo esc_attr( $is_selected ? $filter_cats[ $cat_name ] : '' ); ?>"
                                                                                 placeholder="0">
                                                                 </td>
@@ -157,14 +157,14 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                                                         <?php $is_selected = isset( $filter_cats[ $sub_name ] ); ?>
                                                         <tr>
                                                                 <td>
-                                                                        <input type="checkbox" name="bsi_settings[import_filter_categories][<?php echo esc_attr( $sub_name ); ?>]" value="<?php echo esc_attr( $is_selected ? $filter_cats[ $sub_name ] : '0' ); ?>" <?php checked( $is_selected ); ?>>
+                                                                        <input type="checkbox" name="bsi_settings[filter_cat_check][<?php echo esc_attr( $sub_name ); ?>]" value="1" <?php checked( $is_selected ); ?>>
                                                                 </td>
                                                                 <td><strong><?php echo esc_html( $sub_name ); ?></strong></td>
                                                                 <td><small style="color:#666;"><?php echo esc_html( $info['parent'] ?: '—' ); ?></small></td>
                                                                 <td><code><?php echo esc_html( $info['count'] ); ?></code></td>
                                                                 <td>
                                                                         <input type="number" min="0" style="width:80px;"
-                                                                                name="bsi_settings[import_filter_categories][<?php echo esc_attr( $sub_name ); ?>]"
+                                                                                name="bsi_settings[filter_cat_limit][<?php echo esc_attr( $sub_name ); ?>]"
                                                                                 value="<?php echo esc_attr( $is_selected ? $filter_cats[ $sub_name ] : '' ); ?>"
                                                                                 placeholder="0">
                                                                 </td>
@@ -198,13 +198,13 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                                                         <?php $is_selected = isset( $filter_brands[ $brand_name ] ); ?>
                                                         <tr>
                                                                 <td>
-                                                                        <input type="checkbox" name="bsi_settings[import_filter_brands][<?php echo esc_attr( $brand_name ); ?>]" value="<?php echo esc_attr( $is_selected ? $filter_brands[ $brand_name ] : '0' ); ?>" <?php checked( $is_selected ); ?>>
+                                                                        <input type="checkbox" name="bsi_settings[filter_brand_check][<?php echo esc_attr( $brand_name ); ?>]" value="1" <?php checked( $is_selected ); ?>>
                                                                 </td>
                                                                 <td><strong><?php echo esc_html( $brand_name ); ?></strong></td>
                                                                 <td><code><?php echo esc_html( $count ); ?></code></td>
                                                                 <td>
                                                                         <input type="number" min="0" style="width:80px;"
-                                                                                name="bsi_settings[import_filter_brands][<?php echo esc_attr( $brand_name ); ?>]"
+                                                                                name="bsi_settings[filter_brand_limit][<?php echo esc_attr( $brand_name ); ?>]"
                                                                                 value="<?php echo esc_attr( $is_selected ? $filter_brands[ $brand_name ] : '' ); ?>"
                                                                                 placeholder="0">
                                                                 </td>

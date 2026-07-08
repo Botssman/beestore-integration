@@ -14,6 +14,8 @@ $filter_cats     = $filters['categories'];
 $filter_brands   = $filters['brands'];
 $available_cats  = $available['categories'];
 $available_brands = $available['brands'];
+
+$settings = get_option( 'bsi_settings', array() );
 $webp_enabled    = isset( $settings['webp_enabled'] ) && '1' === $settings['webp_enabled'] ? true : false;
 $webp_strategy   = isset( $settings['webp_strategy'] ) ? $settings['webp_strategy'] : 3;
 $webp_supports   = BSI_WebP::instance()->server_supports();
@@ -26,20 +28,50 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
 		<?php esc_html_e( 'Выберите какие категории и бренды импортировать, и укажите лимиты количества товаров.', 'beestore-integration' ); ?>
 	</p>
 
-	<?php if ( empty( $available_cats ) && empty( $available_brands ) ) : ?>
-		<div class="notice notice-warning">
-			<p>
-				<?php esc_html_e( 'Нет скачанного CSV-файла для анализа. Сначала запустите импорт (BeeStore → Импорт каталога → Начать импорт) — плагин скачает CSV, и на этой странице появится список всех категорий и брендов.', 'beestore-integration' ); ?>
+	<!-- Шаг 1: Скачать CSV для анализа -->
+	<div class="bsi-card" id="bsi-download-section">
+		<h2><?php esc_html_e( 'Шаг 1: Скачать CSV для анализа', 'beestore-integration' ); ?></h2>
+		<p>
+			<?php esc_html_e( 'Чтобы настроить фильтры, нужно сначала скачать CSV-файл с FTP Sirio. Плагин просканирует его и покажет список всех категорий и брендов.', 'beestore-integration' ); ?>
+		</p>
+
+		<?php if ( ! empty( $available_cats ) || ! empty( $available_brands ) ) : ?>
+			<p style="color:#2e7d32;font-weight:600;">
+				✓ <?php esc_html_e( 'CSV уже скачан и отсканирован. Найдено категорий:', 'beestore-integration' ); ?>
+				<strong><?php echo esc_html( count( $available_cats ) ); ?></strong>,
+				<?php esc_html_e( 'брендов:', 'beestore-integration' ); ?>
+				<strong><?php echo esc_html( count( $available_brands ) ); ?></strong>
 			</p>
-		</div>
-	<?php else : ?>
+			<p>
+				<button type="button" class="button button-secondary" id="bsi-download-csv">
+					<span class="dashicons dashicons-update"></span>
+					<?php esc_html_e( 'Скачать заново', 'beestore-integration' ); ?>
+				</button>
+				<span id="bsi-download-status" style="margin-left:10px;"></span>
+			</p>
+		<?php else : ?>
+			<p style="color:#c62828;font-weight:600;">
+				⚠ <?php esc_html_e( 'CSV ещё не скачан. Нажмите кнопку ниже:', 'beestore-integration' ); ?>
+			</p>
+			<p>
+				<button type="button" class="button button-primary button-large" id="bsi-download-csv">
+					<span class="dashicons dashicons-download"></span>
+					<?php esc_html_e( 'Скачать CSV с FTP', 'beestore-integration' ); ?>
+				</button>
+				<span id="bsi-download-status" style="margin-left:10px;"></span>
+			</p>
+		<?php endif; ?>
+	</div>
+
+	<!-- Шаг 2: Настройка фильтров -->
+	<?php if ( ! empty( $available_cats ) || ! empty( $available_brands ) ) : ?>
 
 		<form method="post" action="options.php">
 			<?php settings_fields( 'bsi_settings_group' ); ?>
 
 			<!-- Режим фильтрации -->
 			<div class="bsi-card">
-				<h2><?php esc_html_e( 'Режим фильтрации', 'beestore-integration' ); ?></h2>
+				<h2><?php esc_html_e( 'Шаг 2: Режим фильтрации', 'beestore-integration' ); ?></h2>
 				<table class="form-table" role="presentation">
 					<tr>
 						<th><?php esc_html_e( 'Режим', 'beestore-integration' ); ?></th>
@@ -66,7 +98,7 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
 
 			<!-- Категории -->
 			<div class="bsi-card">
-				<h2><?php esc_html_e( 'Категории', 'beestore-integration' ); ?> (<?php echo esc_html( count( $available_cats ) ); ?>)</h2>
+				<h2><?php esc_html_e( 'Шаг 3: Категории', 'beestore-integration' ); ?> (<?php echo esc_html( count( $available_cats ) ); ?>)</h2>
 				<p class="description">
 					<?php esc_html_e( 'Лимит = максимальное количество РОДИТЕЛЬСКИХ товаров (карточек). 0 = без лимита.', 'beestore-integration' ); ?>
 				</p>
@@ -84,7 +116,7 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
 							<?php $is_selected = isset( $filter_cats[ $cat_name ] ); ?>
 							<tr>
 								<td>
-									<input type="checkbox" name="bsi_settings[import_filter_categories][<?php echo esc_attr( $cat_name ); ?>]" value="0" <?php checked( $is_selected ); ?>>
+									<input type="checkbox" name="bsi_settings[import_filter_categories][<?php echo esc_attr( $cat_name ); ?>]" value="<?php echo esc_attr( $is_selected ? $filter_cats[ $cat_name ] : '0' ); ?>" <?php checked( $is_selected ); ?>>
 								</td>
 								<td><strong><?php echo esc_html( $cat_name ); ?></strong></td>
 								<td><code><?php echo esc_html( $count ); ?></code></td>
@@ -102,7 +134,7 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
 
 			<!-- Бренды -->
 			<div class="bsi-card">
-				<h2><?php esc_html_e( 'Бренды', 'beestore-integration' ); ?> (<?php echo esc_html( count( $available_brands ) ); ?>)</h2>
+				<h2><?php esc_html_e( 'Шаг 4: Бренды', 'beestore-integration' ); ?> (<?php echo esc_html( count( $available_brands ) ); ?>)</h2>
 				<p class="description">
 					<?php esc_html_e( 'Лимит = максимальное количество РОДИТЕЛЬСКИХ товаров (карточек). 0 = без лимита.', 'beestore-integration' ); ?>
 				</p>
@@ -120,7 +152,7 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
 							<?php $is_selected = isset( $filter_brands[ $brand_name ] ); ?>
 							<tr>
 								<td>
-									<input type="checkbox" name="bsi_settings[import_filter_brands][<?php echo esc_attr( $brand_name ); ?>]" value="0" <?php checked( $is_selected ); ?>>
+									<input type="checkbox" name="bsi_settings[import_filter_brands][<?php echo esc_attr( $brand_name ); ?>]" value="<?php echo esc_attr( $is_selected ? $filter_brands[ $brand_name ] : '0' ); ?>" <?php checked( $is_selected ); ?>>
 								</td>
 								<td><strong><?php echo esc_html( $brand_name ); ?></strong></td>
 								<td><code><?php echo esc_html( $count ); ?></code></td>
@@ -136,7 +168,7 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
 				</table>
 			</div>
 
-			<?php submit_button( __( 'Сохранить фильтры', 'beestore-integration' ) ); ?>
+			<?php submit_button( __( 'Шаг 5: Сохранить фильтры', 'beestore-integration' ) ); ?>
 		</form>
 
 	<?php endif; ?>
@@ -178,9 +210,6 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
 								<option value="4" <?php selected( $webp_strategy, 4 ); ?>><?php esc_html_e( '4 — Высокое качество', 'beestore-integration' ); ?></option>
 								<option value="5" <?php selected( $webp_strategy, 5 ); ?>><?php esc_html_e( '5 — Lossless (без потерь, максимальный размер)', 'beestore-integration' ); ?></option>
 							</select>
-							<p class="description">
-								<?php esc_html_e( 'Чем выше число — тем лучше качество, но больше размер файла.', 'beestore-integration' ); ?>
-							</p>
 						</td>
 					</tr>
 				</table>
@@ -193,14 +222,12 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
 	<div class="bsi-card">
 		<h3><?php esc_html_e( 'Как пользоваться фильтрами', 'beestore-integration' ); ?></h3>
 		<ol>
-			<li><?php esc_html_e( 'Запустите импорт (BeeStore → Импорт → Начать импорт) — плагин скачает CSV с FTP', 'beestore-integration' ); ?></li>
-			<li><?php esc_html_e( 'Вернитесь на эту страницу — появятся списки всех категорий и брендов из CSV', 'beestore-integration' ); ?></li>
-			<li><?php esc_html_e( 'Выберите режим: «Импортировать всё», «Только выбранные» или «Все кроме»', 'beestore-integration' ); ?></li>
-			<li><?php esc_html_e( 'Отметьте нужные категории и бренды чекбоксами', 'beestore-integration' ); ?></li>
-			<li><?php esc_html_e( 'Укажите лимиты (0 = без лимита, N = максимум N товаров)', 'beestore-integration' ); ?></li>
-			<li><?php esc_html_e( 'Нажмите «Сохранить фильтры»', 'beestore-integration' ); ?></li>
-			<li><?php esc_html_e( 'В BeeStore → Импорт → нажмите «Остановить и сбросить», затем «Начать импорт» заново', 'beestore-integration' ); ?></li>
-			<li><?php esc_html_e( 'Плагин импортирует только выбранные товары с учётом лимитов', 'beestore-integration' ); ?></li>
+			<li><strong><?php esc_html_e( 'Скачать CSV', 'beestore-integration' ); ?></strong> — <?php esc_html_e( 'нажмите «Скачать CSV с FTP» вверху страницы', 'beestore-integration' ); ?></li>
+			<li><strong><?php esc_html_e( 'Выбрать режим', 'beestore-integration' ); ?></strong> — <?php esc_html_e( '«Импортировать всё», «Только выбранные» или «Все кроме»', 'beestore-integration' ); ?></li>
+			<li><strong><?php esc_html_e( 'Отметить категории и бренды', 'beestore-integration' ); ?></strong> — <?php esc_html_e( 'чекбоксами', 'beestore-integration' ); ?></li>
+			<li><strong><?php esc_html_e( 'Указать лимиты', 'beestore-integration' ); ?></strong> — <?php esc_html_e( '0 = без лимита, N = максимум N товаров', 'beestore-integration' ); ?></li>
+			<li><strong><?php esc_html_e( 'Сохранить фильтры', 'beestore-integration' ); ?></strong></li>
+			<li><strong><?php esc_html_e( 'Перейти в «Импорт каталога»', 'beestore-integration' ); ?></strong> — <?php esc_html_e( 'нажать «Начать импорт» — плагин импортирует только выбранное', 'beestore-integration' ); ?></li>
 		</ol>
 		<p class="description">
 			<strong><?php esc_html_e( 'Логика AND:', 'beestore-integration' ); ?></strong>
@@ -208,3 +235,33 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
 		</p>
 	</div>
 </div>
+
+<script>
+jQuery(document).ready(function($){
+	$('#bsi-download-csv').on('click', function() {
+		var $btn = $(this);
+		var $status = $('#bsi-download-status');
+		$btn.prop('disabled', true);
+		$status.html('<span class="bsi-spinner"></span> Скачивание и сканирование CSV... (это может занять 1-3 минуты)');
+
+		$.post(bsiAdmin.ajaxUrl, {
+			action: 'bsi_download_csv_for_filters',
+			nonce: bsiAdmin.nonce
+		}, function(response) {
+			if (response.success) {
+				$status.html('<span style="color:#2e7d32;">✓ ' + response.data.message + '</span>');
+				// Перезагружаем страницу чтобы показать списки категорий и брендов.
+				setTimeout(function() {
+					location.reload();
+				}, 2000);
+			} else {
+				$btn.prop('disabled', false);
+				$status.html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
+			}
+		}).fail(function() {
+			$btn.prop('disabled', false);
+			$status.html('<span style="color:#c62828;">✗ AJAX error. Возможно, превышен max_execution_time — попробуйте ещё раз.</span>');
+		});
+	});
+});
+</script>

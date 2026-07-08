@@ -51,6 +51,9 @@ class BSI_Importer {
 
                 // AJAX: полная очистка товаров и категорий BeeStore.
                 add_action( 'wp_ajax_bsi_purge_all', array( $this, 'ajax_purge_all' ) );
+
+                // AJAX: скачать CSV с FTP для настройки фильтров (без запуска импорта).
+                add_action( 'wp_ajax_bsi_download_csv_for_filters', array( $this, 'ajax_download_csv_for_filters' ) );
         }
 
         /* ---------------------------------------------------------------------
@@ -545,6 +548,50 @@ class BSI_Importer {
                         ),
                         'deleted_products' => $deleted_products,
                         'deleted_terms'    => $deleted_terms,
+                ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: скачать CSV с FTP для настройки фильтров (без запуска импорта).
+         * --------------------------------------------------------------------- */
+        public function ajax_download_csv_for_filters() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                // Скачиваем файл с FTP (без пометки как processed).
+                $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
+                if ( is_wp_error( $fetch_result ) ) {
+                        wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
+                }
+
+                $csv_file = $fetch_result['csv'];
+                $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
+
+                // Сканируем CSV для получения списка категорий и брендов.
+                $available = BSI_Import_Filters::instance()->scan_csv_for_filters( $csv_file );
+
+                $total_cats   = count( $available['categories'] );
+                $total_brands = count( $available['brands'] );
+
+                $this->log( 'info', 'CSV скачан для настройки фильтров', array(
+                        'file'       => $remote_name,
+                        'categories' => $total_cats,
+                        'brands'     => $total_brands,
+                ) );
+
+                wp_send_json_success( array(
+                        'message'    => sprintf(
+                                __( 'CSV скачан: %s. Найдено категорий: %d, брендов: %d. Теперь настройте фильтры и сохраните.', 'beestore-integration' ),
+                                $remote_name,
+                                $total_cats,
+                                $total_brands
+                        ),
+                        'csv_file'   => $csv_file,
+                        'remote_name' => $remote_name,
+                        'categories' => $available['categories'],
+                        'brands'     => $available['brands'],
                 ) );
         }
 

@@ -468,10 +468,40 @@ class BSI_Admin {
                 }
 
                 // Если есть CSV — сканируем его для получения списка категорий и брендов.
-                $available = array( 'categories' => array(), 'brands' => array() );
+                $available_macro = array();
+                $available_sub   = array();
+                $available_brands = array();
+                $csv_found       = false;
+
                 if ( $csv_file ) {
-                        $available = BSI_Import_Filters::instance()->scan_csv_for_filters( $csv_file );
+                        $csv_found = true;
+                        $scan = BSI_Import_Filters::instance()->scan_csv_for_filters( $csv_file );
+                        $available_macro = $scan['macro'];
+                        $available_sub   = $scan['sub'];
+
+                        // Сканируем бренды отдельно (scan_csv_for_filters не возвращает бренды).
+                        $parser = BSI_CSV_Parser::instance()->open( $csv_file );
+                        if ( ! is_wp_error( $parser ) ) {
+                                foreach ( $parser as $row ) {
+                                        $brand = '';
+                                        if ( ! empty( $row['DSLinea'] ) ) {
+                                                $brand = $row['DSLinea'];
+                                        } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
+                                                $brand = $row['RaggruppamentoLinea'];
+                                        }
+                                        if ( $brand ) {
+                                                if ( ! isset( $available_brands[ $brand ] ) ) {
+                                                        $available_brands[ $brand ] = 0;
+                                                }
+                                                $available_brands[ $brand ]++;
+                                        }
+                                }
+                                $parser->close();
+                                ksort( $available_brands );
+                        }
                 }
+
+                $settings = get_option( 'bsi_settings', array() );
 
                 include BSI_PLUGIN_DIR . 'templates/filters-page.php';
         }

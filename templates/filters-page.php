@@ -12,10 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 $mode            = $filters['mode'];
 $filter_cats     = $filters['categories'];
 $filter_brands   = $filters['brands'];
-$available_cats  = $available['categories'];
-$available_brands = $available['brands'];
 
-$settings = get_option( 'bsi_settings', array() );
 $webp_enabled    = isset( $settings['webp_enabled'] ) && '1' === $settings['webp_enabled'] ? true : false;
 $webp_strategy   = isset( $settings['webp_strategy'] ) ? $settings['webp_strategy'] : 3;
 $webp_supports   = BSI_WebP::instance()->server_supports();
@@ -35,12 +32,15 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                         <?php esc_html_e( 'Чтобы настроить фильтры, нужно сначала скачать CSV-файл с FTP Sirio. Плагин просканирует его и покажет список всех категорий и брендов.', 'beestore-integration' ); ?>
                 </p>
 
-                <?php if ( ! empty( $available_cats ) || ! empty( $available_brands ) ) : ?>
+                <?php if ( $csv_found ) : ?>
                         <p style="color:#2e7d32;font-weight:600;">
-                                ✓ <?php esc_html_e( 'CSV уже скачан и отсканирован. Найдено категорий:', 'beestore-integration' ); ?>
-                                <strong><?php echo esc_html( count( $available_cats ) ); ?></strong>,
-                                <?php esc_html_e( 'брендов:', 'beestore-integration' ); ?>
-                                <strong><?php echo esc_html( count( $available_brands ) ); ?></strong>
+                                ✓ <?php esc_html_e( 'CSV найден и отсканирован.', 'beestore-integration' ); ?>
+                                <?php echo esc_html( sprintf(
+                                        __( 'Макро-категорий: %d, подкатегорий: %d, брендов: %d', 'beestore-integration' ),
+                                        count( $available_macro ),
+                                        count( $available_sub ),
+                                        count( $available_brands )
+                                ) ); ?>
                         </p>
                         <p>
                                 <button type="button" class="button button-secondary" id="bsi-download-csv">
@@ -64,7 +64,7 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
         </div>
 
         <!-- Шаг 2: Настройка фильтров -->
-        <?php if ( ! empty( $available_cats ) || ! empty( $available_brands ) ) : ?>
+        <?php if ( $csv_found && ( ! empty( $available_macro ) || ! empty( $available_sub ) || ! empty( $available_brands ) ) ) : ?>
 
                 <form method="post" action="options.php">
                         <?php settings_fields( 'bsi_settings_group' ); ?>
@@ -96,13 +96,14 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                                 </table>
                         </div>
 
-                        <!-- Категории -->
+                        <!-- Макро-категории -->
+                        <?php if ( ! empty( $available_macro ) ) : ?>
                         <div class="bsi-card">
-                                <h2><?php esc_html_e( 'Шаг 3: Категории', 'beestore-integration' ); ?> (<?php echo esc_html( count( $available_cats ) ); ?>)</h2>
+                                <h2><?php esc_html_e( 'Шаг 3: Макро-категории', 'beestore-integration' ); ?> (<?php echo esc_html( count( $available_macro ) ); ?>)</h2>
                                 <p class="description">
                                         <?php esc_html_e( 'Лимит = максимальное количество РОДИТЕЛЬСКИХ товаров (карточек). 0 = без лимита.', 'beestore-integration' ); ?>
                                 </p>
-                                <table class="widefat striped" style="max-height:400px;overflow-y:auto;display:block;">
+                                <table class="widefat striped">
                                         <thead>
                                                 <tr>
                                                         <th style="width:30px;"><?php esc_html_e( '✓', 'beestore-integration' ); ?></th>
@@ -112,7 +113,7 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                                                 </tr>
                                         </thead>
                                         <tbody>
-                                                <?php foreach ( $available_cats as $cat_name => $count ) : ?>
+                                                <?php foreach ( $available_macro as $cat_name => $count ) : ?>
                                                         <?php $is_selected = isset( $filter_cats[ $cat_name ] ); ?>
                                                         <tr>
                                                                 <td>
@@ -131,14 +132,59 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                                         </tbody>
                                 </table>
                         </div>
+                        <?php endif; ?>
 
-                        <!-- Бренды -->
+                        <!-- Подкатегории -->
+                        <?php if ( ! empty( $available_sub ) ) : ?>
                         <div class="bsi-card">
-                                <h2><?php esc_html_e( 'Шаг 4: Бренды', 'beestore-integration' ); ?> (<?php echo esc_html( count( $available_brands ) ); ?>)</h2>
+                                <h2><?php esc_html_e( 'Шаг 4: Подкатегории', 'beestore-integration' ); ?> (<?php echo esc_html( count( $available_sub ) ); ?>)</h2>
                                 <p class="description">
                                         <?php esc_html_e( 'Лимит = максимальное количество РОДИТЕЛЬСКИХ товаров (карточек). 0 = без лимита.', 'beestore-integration' ); ?>
                                 </p>
-                                <table class="widefat striped" style="max-height:400px;overflow-y:auto;display:block;">
+                                <div style="max-height:500px;overflow-y:auto;">
+                                <table class="widefat striped">
+                                        <thead>
+                                                <tr>
+                                                        <th style="width:30px;"><?php esc_html_e( '✓', 'beestore-integration' ); ?></th>
+                                                        <th><?php esc_html_e( 'Подкатегория', 'beestore-integration' ); ?></th>
+                                                        <th style="width:120px;"><?php esc_html_e( 'Родитель', 'beestore-integration' ); ?></th>
+                                                        <th style="width:100px;"><?php esc_html_e( 'Строк', 'beestore-integration' ); ?></th>
+                                                        <th style="width:120px;"><?php esc_html_e( 'Лимит', 'beestore-integration' ); ?></th>
+                                                </tr>
+                                        </thead>
+                                        <tbody>
+                                                <?php foreach ( $available_sub as $sub_name => $info ) : ?>
+                                                        <?php $is_selected = isset( $filter_cats[ $sub_name ] ); ?>
+                                                        <tr>
+                                                                <td>
+                                                                        <input type="checkbox" name="bsi_settings[import_filter_categories][<?php echo esc_attr( $sub_name ); ?>]" value="<?php echo esc_attr( $is_selected ? $filter_cats[ $sub_name ] : '0' ); ?>" <?php checked( $is_selected ); ?>>
+                                                                </td>
+                                                                <td><strong><?php echo esc_html( $sub_name ); ?></strong></td>
+                                                                <td><small style="color:#666;"><?php echo esc_html( $info['parent'] ?: '—' ); ?></small></td>
+                                                                <td><code><?php echo esc_html( $info['count'] ); ?></code></td>
+                                                                <td>
+                                                                        <input type="number" min="0" style="width:80px;"
+                                                                                name="bsi_settings[import_filter_categories][<?php echo esc_attr( $sub_name ); ?>]"
+                                                                                value="<?php echo esc_attr( $is_selected ? $filter_cats[ $sub_name ] : '' ); ?>"
+                                                                                placeholder="0">
+                                                                </td>
+                                                        </tr>
+                                                <?php endforeach; ?>
+                                        </tbody>
+                                </table>
+                                </div>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- Бренды -->
+                        <?php if ( ! empty( $available_brands ) ) : ?>
+                        <div class="bsi-card">
+                                <h2><?php esc_html_e( 'Шаг 5: Бренды', 'beestore-integration' ); ?> (<?php echo esc_html( count( $available_brands ) ); ?>)</h2>
+                                <p class="description">
+                                        <?php esc_html_e( 'Лимит = максимальное количество РОДИТЕЛЬСКИХ товаров (карточек). 0 = без лимита.', 'beestore-integration' ); ?>
+                                </p>
+                                <div style="max-height:500px;overflow-y:auto;">
+                                <table class="widefat striped">
                                         <thead>
                                                 <tr>
                                                         <th style="width:30px;"><?php esc_html_e( '✓', 'beestore-integration' ); ?></th>
@@ -166,9 +212,11 @@ $webp_supports   = BSI_WebP::instance()->server_supports();
                                                 <?php endforeach; ?>
                                         </tbody>
                                 </table>
+                                </div>
                         </div>
+                        <?php endif; ?>
 
-                        <?php submit_button( __( 'Шаг 5: Сохранить фильтры', 'beestore-integration' ) ); ?>
+                        <?php submit_button( __( 'Сохранить фильтры', 'beestore-integration' ) ); ?>
                 </form>
 
         <?php endif; ?>

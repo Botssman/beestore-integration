@@ -48,6 +48,15 @@ class BSI_Admin {
 
                 add_submenu_page(
                         'beestore-integration',
+                        __( 'Переводы', 'beestore-integration' ),
+                        __( 'Переводы', 'beestore-integration' ),
+                        $cap,
+                        'bsi-translations',
+                        array( $this, 'render_translations_page' )
+                );
+
+                add_submenu_page(
+                        'beestore-integration',
                         __( 'Логи', 'beestore-integration' ),
                         __( 'Логи', 'beestore-integration' ),
                         $cap,
@@ -401,5 +410,26 @@ class BSI_Admin {
                 header( 'Content-Length: ' . filesize( $local_file ) );
                 readfile( $local_file );
                 exit;
+        }
+
+        /* ---------------------------------------------------------------------
+         * Страница «Переводы» — перевод категорий и пола на русский.
+         * --------------------------------------------------------------------- */
+        public function render_translations_page() {
+                $tr = BSI_Translations::instance();
+
+                // Текущая выбранная таксономия (по умолчанию product_cat).
+                $current_tax = isset( $_GET['taxonomy'] ) ? sanitize_text_field( wp_unslash( $_GET['taxonomy'] ) ) : 'product_cat';
+                if ( ! isset( BSI_Translations::SUPPORTED_TAXONOMIES[ $current_tax ] ) ) {
+                        $current_tax = 'product_cat';
+                }
+
+                // Существующие термы.
+                $existing_terms = $tr->get_existing_terms( $current_tax );
+
+                // Сохранённые переводы.
+                $saved_translations = $tr->get_translations( $current_tax );
+
+                include BSI_PLUGIN_DIR . 'templates/translations-page.php';
         }
 }

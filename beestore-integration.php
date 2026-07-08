@@ -105,6 +105,7 @@ add_action(
                 BSI_Order_Sync::instance();
                 BSI_Status_Sync::instance();
                 BSI_Currency::instance();
+                BSI_Translations::instance();
                 BSI_Admin::instance();
                 BSI_Cron::instance();
         }

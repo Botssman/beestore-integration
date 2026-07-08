@@ -1219,15 +1219,33 @@ class BSI_Importer {
                 $category = isset( $row['DSCategoriaMerceologicaWeb'] ) && $row['DSCategoriaMerceologicaWeb']
                         ? $row['DSCategoriaMerceologicaWeb']
                         : ( isset( $row['DSCategoriaMerceologica'] ) ? $row['DSCategoriaMerceologica'] : '' );
+
+                // Перевод категории (если задан во вкладке "Переводы").
+                if ( $category ) {
+                        $translated = BSI_Translations::instance()->get_translation( 'product_cat', $category );
+                        if ( $translated ) {
+                                $category = $translated;
+                        }
+                }
+
                 $cat_ids = array();
                 if ( $category ) {
                         $cat_ids[] = $this->ensure_term( $category, 'product_cat' );
                 }
                 // Подкатегория — Reparto.
+                $subcat = '';
                 if ( ! empty( $row['DSRepartoWeb'] ) ) {
-                        $cat_ids[] = $this->ensure_term( $row['DSRepartoWeb'], 'product_cat', $category );
+                        $subcat = $row['DSRepartoWeb'];
                 } elseif ( ! empty( $row['DSReparto'] ) ) {
-                        $cat_ids[] = $this->ensure_term( $row['DSReparto'], 'product_cat', $category );
+                        $subcat = $row['DSReparto'];
+                }
+                // Перевод подкатегории.
+                if ( $subcat ) {
+                        $translated_sub = BSI_Translations::instance()->get_translation( 'product_cat', $subcat );
+                        if ( $translated_sub ) {
+                                $subcat = $translated_sub;
+                        }
+                        $cat_ids[] = $this->ensure_term( $subcat, 'product_cat', $category );
                 }
                 if ( ! empty( $cat_ids ) ) {
                         wp_set_post_terms( $product_id, array_filter( $cat_ids ), 'product_cat' );
@@ -1277,6 +1295,13 @@ class BSI_Importer {
                 } elseif ( ! empty( $row['DSSesso'] ) ) {
                         $gender_name = $row['DSSesso'];
                 }
+                // Перевод пола.
+                if ( $gender_name ) {
+                        $translated_gender = BSI_Translations::instance()->get_translation( 'pa_sesso', $gender_name );
+                        if ( $translated_gender ) {
+                                $gender_name = $translated_gender;
+                        }
+                }
                 if ( $gender_name && taxonomy_exists( 'pa_sesso' ) ) {
                         $gender_id = $this->ensure_term( $gender_name, 'pa_sesso' );
                         wp_set_post_terms( $product_id, array( $gender_id ), 'pa_sesso' );
@@ -1291,6 +1316,9 @@ class BSI_Importer {
 
         /**
          * Создать/получить term.
+         *
+         * ВАЖНО: При обновлении существующего терма НЕ ТРОГАЕМ slug и thumbnail_id.
+         * Это позволяет админу загружать картинки для категорий — плагин их не перезапишет.
          */
         private function ensure_term( $name, $taxonomy, $parent_name = '' ) {
                 $parent = 0;

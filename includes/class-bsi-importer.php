@@ -121,38 +121,14 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Импорт уже идёт. Обновите страницу.', 'beestore-integration' ) ) );
                 }
 
-                // СНАЧАЛА проверяем — есть ли уже скачанный CSV на сервере.
-                $upload_dir    = wp_upload_dir();
-                $downloads_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/downloads';
-                $extracted_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/extracted';
-
-                $csvs = glob( $downloads_dir . '/*.csv' );
-                if ( empty( $csvs ) && is_dir( $extracted_dir ) ) {
-                        $csvs = glob( $extracted_dir . '/*/*.csv' );
+                // Скачиваем файл с FTP.
+                $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
+                if ( is_wp_error( $fetch_result ) ) {
+                        wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
                 }
 
-                if ( ! empty( $csvs ) ) {
-                        // CSV уже скачан — используем его, не трогаем FTP.
-                        $csv_file   = $csvs[0];
-                        $remote_name = basename( $csv_file );
-
-                        BSI_Logger::instance()->info( 'importer', 'Используем уже скачанный CSV', array(
-                                'file' => $remote_name,
-                        ) );
-                } else {
-                        // CSV нет — скачиваем с FTP.
-                        if ( function_exists( 'set_time_limit' ) ) {
-                                @set_time_limit( 600 );
-                        }
-
-                        $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
-                        if ( is_wp_error( $fetch_result ) ) {
-                                wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
-                        }
-
-                        $csv_file    = $fetch_result['csv'];
-                        $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
-                }
+                $csv_file = $fetch_result['csv'];
+                $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
 
                 // Считаем количество строк.
                 $count_result = BSI_CSV_Parser::instance()->count_lines( $csv_file );
@@ -596,77 +572,7 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
                 }
 
-                // Сначала проверяем — может CSV уже скачан (от предыдущего импорта или попытки).
-                $upload_dir   = wp_upload_dir();
-                $downloads_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/downloads';
-                $extracted_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/extracted';
-
-                // Ищем CSV в downloads/.
-                $csvs = glob( $downloads_dir . '/*.csv' );
-                if ( empty( $csvs ) && is_dir( $extracted_dir ) ) {
-                        $csvs = glob( $extracted_dir . '/*/*.csv' );
-                }
-
-                // Если CSV уже есть — просто сканируем его.
-                if ( ! empty( $csvs ) ) {
-                        $csv_file   = $csvs[0];
-                        $remote_name = basename( $csv_file );
-
-                        $available = BSI_Import_Filters::instance()->scan_csv_for_filters( $csv_file );
-
-                        $total_cats   = count( $available['macro'] ) + count( $available['sub'] );
-                        $total_brands = 0; // Бренды сканируем отдельно.
-
-                        // Сканируем бренды.
-                        $parser = BSI_CSV_Parser::instance()->open( $csv_file );
-                        $brands = array();
-                        if ( ! is_wp_error( $parser ) ) {
-                                foreach ( $parser as $row ) {
-                                        $brand = '';
-                                        if ( ! empty( $row['DSLinea'] ) ) {
-                                                $brand = $row['DSLinea'];
-                                        } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
-                                                $brand = $row['RaggruppamentoLinea'];
-                                        }
-                                        if ( $brand ) {
-                                                if ( ! isset( $brands[ $brand ] ) ) {
-                                                        $brands[ $brand ] = 0;
-                                                }
-                                                $brands[ $brand ]++;
-                                        }
-                                }
-                                $parser->close();
-                                ksort( $brands );
-                                $total_brands = count( $brands );
-                        }
-
-                        $this->log( 'info', 'CSV уже скачан — сканирование завершено', array(
-                                'file'       => $remote_name,
-                                'macro_cats' => count( $available['macro'] ),
-                                'sub_cats'   => count( $available['sub'] ),
-                                'brands'     => $total_brands,
-                        ) );
-
-                        wp_send_json_success( array(
-                                'message'    => sprintf(
-                                        __( 'CSV найден на сервере: %s. Найдено макро-категорий: %d, подкатегорий: %d, брендов: %d.', 'beestore-integration' ),
-                                        $remote_name,
-                                        count( $available['macro'] ),
-                                        count( $available['sub'] ),
-                                        $total_brands
-                                ),
-                                'csv_file'   => $csv_file,
-                                'remote_name' => $remote_name,
-                        ) );
-                        return;
-                }
-
-                // CSV нет — скачиваем с FTP.
-                // Увеличиваем лимит времени.
-                if ( function_exists( 'set_time_limit' ) ) {
-                        @set_time_limit( 600 ); // 10 минут.
-                }
-
+                // Скачиваем файл с FTP (без пометки как processed).
                 $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
                 if ( is_wp_error( $fetch_result ) ) {
                         wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
@@ -675,24 +581,29 @@ class BSI_Importer {
                 $csv_file = $fetch_result['csv'];
                 $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
 
-                // Сканируем только макро-категории (быстро).
+                // Сканируем CSV для получения списка категорий и брендов.
                 $available = BSI_Import_Filters::instance()->scan_csv_for_filters( $csv_file );
+
+                $total_cats   = count( $available['categories'] );
+                $total_brands = count( $available['brands'] );
 
                 $this->log( 'info', 'CSV скачан для настройки фильтров', array(
                         'file'       => $remote_name,
-                        'macro_cats' => count( $available['macro'] ),
-                        'sub_cats'   => count( $available['sub'] ),
+                        'categories' => $total_cats,
+                        'brands'     => $total_brands,
                 ) );
 
                 wp_send_json_success( array(
                         'message'    => sprintf(
-                                __( 'CSV скачан: %s. Найдено макро-категорий: %d, подкатегорий: %d. Теперь настройте фильтры и сохраните.', 'beestore-integration' ),
+                                __( 'CSV скачан: %s. Найдено категорий: %d, брендов: %d. Теперь настройте фильтры и сохраните.', 'beestore-integration' ),
                                 $remote_name,
-                                count( $available['macro'] ),
-                                count( $available['sub'] )
+                                $total_cats,
+                                $total_brands
                         ),
                         'csv_file'   => $csv_file,
                         'remote_name' => $remote_name,
+                        'categories' => $available['categories'],
+                        'brands'     => $available['brands'],
                 ) );
         }
 

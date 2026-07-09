@@ -221,7 +221,7 @@ class BSI_Import_Filters {
 
         /**
          * Сканировать один батч CSV (5000 строк).
-         * Использует fseek() для прямого позиционирования — НЕ читает файл с начала!
+         * Использует fgets() + str_getcsv() — без буферизации, ftell() работает точно.
          *
          * @return array|WP_Error
          */
@@ -236,23 +236,22 @@ class BSI_Import_Filters {
                         return new WP_Error( 'bsi_open', 'Не удалось открыть CSV.' );
                 }
 
-                // Пропускаем BOM.
-                $bom = fread( $handle, 3 );
-                if ( "\xEF\xBB\xBF" !== $bom ) {
-                        fseek( $handle, 0 );
-                }
-
-                // Восстанавливаем позицию файла (быстрое позиционирование через fseek).
+                // Восстанавливаем позицию файла.
                 $file_pos = isset( $state['file_pos'] ) ? (int) $state['file_pos'] : 0;
-                if ( $file_pos > 0 ) {
-                        fseek( $handle, $file_pos );
-                } else {
-                        // Первая итерация — читаем заголовок.
-                        $headers = fgetcsv( $handle, 0, ',', '"' );
-                        if ( ! $headers ) {
+                fseek( $handle, $file_pos );
+
+                // Если это первый батч (позиция 0) — читаем заголовок.
+                $headers = isset( $state['headers'] ) ? $state['headers'] : null;
+                if ( null === $headers ) {
+                        $header_line = fgets( $handle, 1048576 );
+                        if ( false === $header_line ) {
                                 fclose( $handle );
                                 return new WP_Error( 'bsi_no_headers', 'Не удалось прочитать заголовок CSV.' );
                         }
+                        // Убираем BOM если есть.
+                        $header_line = preg_replace( '/^\xEF\xBB\xBF/', '', $header_line );
+                        $header_line = trim( $header_line );
+                        $headers = str_getcsv( $header_line, ',', '"' );
                         $headers = array_map( 'trim', $headers );
                 }
 
@@ -264,9 +263,14 @@ class BSI_Import_Filters {
                 $brands = isset( $state['brands'] ) ? $state['brands'] : array();
 
                 while ( ! feof( $handle ) && $count < $batch ) {
-                        $row = fgetcsv( $handle, 0, ',', '"' );
-                        if ( false === $row || null === $row ) {
-                                break;
+                        $line = fgets( $handle, 1048576 );
+                        if ( false === $line || '' === trim( $line ) ) {
+                                continue;
+                        }
+
+                        $row = str_getcsv( $line, ',', '"' );
+                        if ( false === $row || count( $row ) < 5 ) {
+                                continue;
                         }
 
                         // Ассоциативный массив.
@@ -323,12 +327,13 @@ class BSI_Import_Filters {
                         }
                 }
 
-                // Сохраняем позицию файла для следующего батча.
+                // Сохраняем позицию файла (fgets не буферизует — ftell точный).
                 $new_pos = ftell( $handle );
                 $at_eof  = feof( $handle );
                 fclose( $handle );
 
                 $state['file_pos']  = $new_pos;
+                $state['headers']   = $headers;
                 $state['processed'] = ( isset( $state['processed'] ) ? (int) $state['processed'] : 0 ) + $count;
                 $state['macro']     = $macro;
                 $state['sub']       = $sub;
@@ -343,6 +348,9 @@ class BSI_Import_Filters {
                         'done'      => $done,
                         'processed' => $state['processed'],
                         'total'     => (int) $state['total'],
+                        'macro'     => count( $macro ),
+                        'sub'       => count( $sub ),
+                        'brands'    => count( $brands ),
                 );
         }
 

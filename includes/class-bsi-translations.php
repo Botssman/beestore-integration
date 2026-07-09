@@ -167,8 +167,9 @@ class BSI_Translations {
         /**
          * Получить перевод для конкретного значения.
          *
-         * Сначала проверяет пользовательские переводы (сохранённые в БД),
-         * потом — предзаполненный словарь.
+         * Проверяет ТОЛЬКО пользовательские переводы (сохранённые в БД).
+         * Автоперевод НЕ применяется — категории импортируются на английском,
+         * пользователь переводит сам через вкладку «Переводы».
          *
          * @param string $taxonomy
          * @param string $original Английское название (например 'CLOTHING').
@@ -180,24 +181,9 @@ class BSI_Translations {
                         return '';
                 }
 
-                // 1. Проверяем пользовательские переводы (из БД).
+                // Проверяем только пользовательские переводы (из БД).
                 $translations = $this->get_translations( $taxonomy );
-                if ( isset( $translations[ $original ] ) ) {
-                        return $translations[ $original ];
-                }
-
-                // 2. Проверяем предзаполненный словарь.
-                if ( 'product_cat' === $taxonomy ) {
-                        if ( isset( self::DEFAULT_TRANSLATIONS_PRODUCT_CAT[ $original ] ) ) {
-                                return self::DEFAULT_TRANSLATIONS_PRODUCT_CAT[ $original ];
-                        }
-                } elseif ( 'pa_sesso' === $taxonomy ) {
-                        if ( isset( self::DEFAULT_TRANSLATIONS_PA_SESSO[ $original ] ) ) {
-                                return self::DEFAULT_TRANSLATIONS_PA_SESSO[ $original ];
-                        }
-                }
-
-                return '';
+                return isset( $translations[ $original ] ) ? $translations[ $original ] : '';
         }
 
         /**

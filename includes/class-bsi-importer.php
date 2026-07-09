@@ -210,6 +210,13 @@ class BSI_Importer {
                 // Сбрасываем счётчики фильтров (лимиты категорий/брендов).
                 BSI_Import_Filters::instance()->reset_counters();
 
+                // Размер батча — из настроек (по умолчанию 200).
+                $settings = get_option( 'bsi_settings', array() );
+                $batch_size = isset( $settings['import_batch_size'] ) ? (int) $settings['import_batch_size'] : 200;
+                if ( $batch_size < 10 ) {
+                        $batch_size = 50;
+                }
+
                 // Сохраняем состояние.
                 $new_state = array(
                         'status'          => 'running',
@@ -224,7 +231,7 @@ class BSI_Importer {
                         'elapsed_seconds' => 0,
                         'errors_count'    => 0,
                         'last_error'      => '',
-                        'batch_size'      => 50,
+                        'batch_size'      => $batch_size,
                         'created_products' => 0,
                         'updated_products' => 0,
                 );

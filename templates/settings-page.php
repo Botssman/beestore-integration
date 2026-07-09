@@ -84,6 +84,7 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
 
         <form method="post" action="options.php">
                 <?php settings_fields( 'bsi_settings_group' ); ?>
+                <input type="hidden" name="bsi_settings[_form_id]" value="settings">
 
                 <h2 class="nav-tab-wrapper" style="margin-bottom:15px;">
                         <a href="#bsi-ftp" class="nav-tab nav-tab-active" data-tab="ftp"><?php esc_html_e( 'FTP', 'beestore-integration' ); ?></a>

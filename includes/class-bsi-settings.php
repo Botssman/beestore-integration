@@ -106,7 +106,52 @@ class BSI_Settings {
         }
 
         public function sanitize_settings( $input ) {
-                $output = array();
+                // Загружаем ТЕКУЩИЕ настройки как базу.
+                $current = get_option( $this->settings_key, array() );
+                $output  = is_array( $current ) ? $current : array();
+
+                // Какая форма сохраняется?
+                $form_id = isset( $input['_form_id'] ) ? $input['_form_id'] : '';
+
+                // Если форма — "filters", обновляем ТОЛЬКО поля фильтров.
+                // Все остальные настройки (FTP, SOAP, и т.д.) остаются из $current.
+                if ( 'filters' === $form_id ) {
+                        // Режим фильтрации.
+                        if ( isset( $input['import_filter_mode'] ) ) {
+                                $output['import_filter_mode'] = sanitize_text_field( $input['import_filter_mode'] );
+                                if ( ! in_array( $output['import_filter_mode'], array( 'all', 'whitelist', 'blacklist' ), true ) ) {
+                                        $output['import_filter_mode'] = 'all';
+                                }
+                        }
+
+                        // Категории.
+                        $output['import_filter_categories'] = array();
+                        $cat_checks = isset( $input['filter_cat_check'] ) && is_array( $input['filter_cat_check'] ) ? $input['filter_cat_check'] : array();
+                        $cat_limits = isset( $input['filter_cat_limit'] ) && is_array( $input['filter_cat_limit'] ) ? $input['filter_cat_limit'] : array();
+                        foreach ( $cat_checks as $cat_name => $checked ) {
+                                $cat_name = sanitize_text_field( $cat_name );
+                                if ( ! $cat_name ) { continue; }
+                                $limit = isset( $cat_limits[ $cat_name ] ) ? $cat_limits[ $cat_name ] : 0;
+                                $limit = '' === $limit ? 0 : absint( $limit );
+                                $output['import_filter_categories'][ $cat_name ] = $limit;
+                        }
+
+                        // Бренды.
+                        $output['import_filter_brands'] = array();
+                        $brand_checks = isset( $input['filter_brand_check'] ) && is_array( $input['filter_brand_check'] ) ? $input['filter_brand_check'] : array();
+                        $brand_limits = isset( $input['filter_brand_limit'] ) && is_array( $input['filter_brand_limit'] ) ? $input['filter_brand_limit'] : array();
+                        foreach ( $brand_checks as $brand_name => $checked ) {
+                                $brand_name = sanitize_text_field( $brand_name );
+                                if ( ! $brand_name ) { continue; }
+                                $limit = isset( $brand_limits[ $brand_name ] ) ? $brand_limits[ $brand_name ] : 0;
+                                $limit = '' === $limit ? 0 : absint( $limit );
+                                $output['import_filter_brands'][ $brand_name ] = $limit;
+                        }
+
+                        return $output;
+                }
+
+                // --- Форма "settings" — обновляем все основные настройки ---
 
                 // FTP.
                 $output['ftp_host']     = isset( $input['ftp_host'] ) ? sanitize_text_field( $input['ftp_host'] ) : '';
@@ -167,7 +212,6 @@ class BSI_Settings {
                 $output['round_prices']            = isset( $input['round_prices'] ) ? '1' : '0';
 
                 // Сохраняем информацию о последнем авто-обновлении (не из формы, а из текущих опций).
-                $current = get_option( $this->settings_key, array() );
                 $output['currency_rate_last_source'] = isset( $current['currency_rate_last_source'] ) ? $current['currency_rate_last_source'] : '';
                 $output['currency_rate_last_update'] = isset( $current['currency_rate_last_update'] ) ? $current['currency_rate_last_update'] : '';
 
@@ -182,40 +226,6 @@ class BSI_Settings {
                 // WebP конвертация.
                 $output['webp_enabled']  = isset( $input['webp_enabled'] ) ? '1' : '0';
                 $output['webp_strategy'] = isset( $input['webp_strategy'] ) ? max( 1, min( 5, absint( $input['webp_strategy'] ) ) ) : 3;
-
-                // Фильтры импорта.
-                $output['import_filter_mode'] = isset( $input['import_filter_mode'] ) ? sanitize_text_field( $input['import_filter_mode'] ) : 'all';
-                if ( ! in_array( $output['import_filter_mode'], array( 'all', 'whitelist', 'blacklist' ), true ) ) {
-                        $output['import_filter_mode'] = 'all';
-                }
-
-                // Фильтр категорий: чекбокс (filter_cat_check) + лимит (filter_cat_limit).
-                $output['import_filter_categories'] = array();
-                $cat_checks = isset( $input['filter_cat_check'] ) && is_array( $input['filter_cat_check'] ) ? $input['filter_cat_check'] : array();
-                $cat_limits = isset( $input['filter_cat_limit'] ) && is_array( $input['filter_cat_limit'] ) ? $input['filter_cat_limit'] : array();
-                foreach ( $cat_checks as $cat_name => $checked ) {
-                        $cat_name = sanitize_text_field( $cat_name );
-                        if ( ! $cat_name ) {
-                                continue;
-                        }
-                        $limit = isset( $cat_limits[ $cat_name ] ) ? $cat_limits[ $cat_name ] : 0;
-                        $limit = '' === $limit ? 0 : absint( $limit );
-                        $output['import_filter_categories'][ $cat_name ] = $limit;
-                }
-
-                // Фильтр брендов: чекбокс (filter_brand_check) + лимит (filter_brand_limit).
-                $output['import_filter_brands'] = array();
-                $brand_checks = isset( $input['filter_brand_check'] ) && is_array( $input['filter_brand_check'] ) ? $input['filter_brand_check'] : array();
-                $brand_limits = isset( $input['filter_brand_limit'] ) && is_array( $input['filter_brand_limit'] ) ? $input['filter_brand_limit'] : array();
-                foreach ( $brand_checks as $brand_name => $checked ) {
-                        $brand_name = sanitize_text_field( $brand_name );
-                        if ( ! $brand_name ) {
-                                continue;
-                        }
-                        $limit = isset( $brand_limits[ $brand_name ] ) ? $brand_limits[ $brand_name ] : 0;
-                        $limit = '' === $limit ? 0 : absint( $limit );
-                        $output['import_filter_brands'][ $brand_name ] = $limit;
-                }
 
                 return $output;
         }

@@ -56,6 +56,7 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands );
         <?php if ( $has_scan ) : ?>
                 <form method="post" action="options.php">
                         <?php settings_fields( 'bsi_settings_group' ); ?>
+                <input type="hidden" name="bsi_settings[_form_id]" value="filters">
 
                         <!-- Режим -->
                         <div class="bsi-card">

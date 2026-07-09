@@ -140,10 +140,21 @@ class BSI_Importer {
                 }
 
                 if ( ! empty( $csvs ) ) {
-                        usort( $csvs, function( $a, $b ) {
-                                return filemtime( $b ) - filemtime( $a );
+                        // Приоритет: файл с _0000001 в имени (полный каталог).
+                        $full_catalog = array_filter( $csvs, function( $f ) {
+                                return false !== strpos( basename( $f ), '_0000001.' );
                         });
-                        $csv_file   = $csvs[0];
+                        if ( ! empty( $full_catalog ) ) {
+                                usort( $full_catalog, function( $a, $b ) {
+                                        return filemtime( $b ) - filemtime( $a );
+                                });
+                                $csv_file = $full_catalog[0];
+                        } else {
+                                usort( $csvs, function( $a, $b ) {
+                                        return filemtime( $b ) - filemtime( $a );
+                                });
+                                $csv_file = $csvs[0];
+                        }
                         $remote_name = basename( $csv_file );
                 } else {
                         // CSV нет — скачиваем с FTP.
@@ -670,11 +681,21 @@ class BSI_Importer {
                         }
                         $csv_file = $fetch_result['csv'];
                 } else {
-                        // Берём самый свежий CSV (по дате изменения).
-                        usort( $csvs, function( $a, $b ) {
-                                return filemtime( $b ) - filemtime( $a );
+                        // Приоритет: файл с _0000001 в имени (полный каталог).
+                        $full_catalog = array_filter( $csvs, function( $f ) {
+                                return false !== strpos( basename( $f ), '_0000001.' );
                         });
-                        $csv_file = $csvs[0];
+                        if ( ! empty( $full_catalog ) ) {
+                                usort( $full_catalog, function( $a, $b ) {
+                                        return filemtime( $b ) - filemtime( $a );
+                                });
+                                $csv_file = $full_catalog[0];
+                        } else {
+                                usort( $csvs, function( $a, $b ) {
+                                        return filemtime( $b ) - filemtime( $a );
+                                });
+                                $csv_file = $csvs[0];
+                        }
                 }
 
                 BSI_Import_Filters::instance()->init_scan( $csv_file );
@@ -682,6 +703,7 @@ class BSI_Importer {
                 wp_send_json_success( array(
                         'message' => 'Сканирование началось...',
                         'file'    => basename( $csv_file ),
+                        'size'    => size_format( filesize( $csv_file ) ),
                 ) );
         }
 

@@ -556,8 +556,8 @@ class BSI_Importer {
                         }
                 }
 
-                // 2. Очищаем все термы BeeStore в таксономиях product_cat, pa_brand, pa_colore, pa_taglia, pa_stagione, pa_country, pa_sesso, pa_collezione.
-                $taxonomies_to_clean = array( 'product_cat', 'pa_brand', 'pa_colore', 'pa_taglia', 'pa_stagione', 'pa_country', 'pa_sesso', 'pa_collezione' );
+                // 2. Очищаем все термы BeeStore в таксономиях product_cat, pa_brand, pa_color, pa_size, pa_stagione, pa_country, pa_sesso, pa_collezione.
+                $taxonomies_to_clean = array( 'product_cat', 'pa_brand', 'pa_color', 'pa_size', 'pa_stagione', 'pa_country', 'pa_sesso', 'pa_collezione' );
                 if ( taxonomy_exists( 'product_brand' ) ) {
                         $taxonomies_to_clean[] = 'product_brand';
                 }
@@ -1031,7 +1031,7 @@ class BSI_Importer {
 
                 $product_id = $product->save();
 
-                // Атрибуты: Color + Size (через глобальные таксономии pa_colore, pa_taglia).
+                // Атрибуты: Color + Size (через глобальные таксономии pa_color, pa_size).
                 $colors = array();
                 $sizes  = array();
                 foreach ( $variant_rows as $v ) {
@@ -1048,42 +1048,42 @@ class BSI_Importer {
                 $attributes = array();
 
                 if ( ! empty( $colors ) ) {
-                        // Создаём термы в pa_colore и собираем их slug'и.
+                        // Создаём термы в pa_color и собираем их slug'и.
                         $color_slugs = array();
                         foreach ( $colors as $color_name ) {
-                                $slug = $this->ensure_attribute_term( $color_name, 'pa_colore' );
+                                $slug = $this->ensure_attribute_term( $color_name, 'pa_color' );
                                 if ( $slug ) {
                                         $color_slugs[] = $slug;
                                 }
                         }
 
                         $attr_color = new WC_Product_Attribute();
-                        $attr_color->set_id( $this->get_attribute_id( 'pa_colore' ) );
-                        $attr_color->set_name( 'pa_colore' );
+                        $attr_color->set_id( $this->get_attribute_id( 'pa_color' ) );
+                        $attr_color->set_name( 'pa_color' );
                         $attr_color->set_options( $color_slugs );
                         $attr_color->set_position( 1 );
                         $attr_color->set_visible( true );
                         $attr_color->set_variation( true );
-                        $attributes['pa_colore'] = $attr_color;
+                        $attributes['pa_color'] = $attr_color;
                 }
                 if ( ! empty( $sizes ) ) {
-                        // Создаём термы в pa_taglia.
+                        // Создаём термы в pa_size.
                         $size_slugs = array();
                         foreach ( $sizes as $size_name ) {
-                                $slug = $this->ensure_attribute_term( $size_name, 'pa_taglia' );
+                                $slug = $this->ensure_attribute_term( $size_name, 'pa_size' );
                                 if ( $slug ) {
                                         $size_slugs[] = $slug;
                                 }
                         }
 
                         $attr_size = new WC_Product_Attribute();
-                        $attr_size->set_id( $this->get_attribute_id( 'pa_taglia' ) );
-                        $attr_size->set_name( 'pa_taglia' );
+                        $attr_size->set_id( $this->get_attribute_id( 'pa_size' ) );
+                        $attr_size->set_name( 'pa_size' );
                         $attr_size->set_options( $size_slugs );
                         $attr_size->set_position( 2 );
                         $attr_size->set_visible( true );
                         $attr_size->set_variation( true );
-                        $attributes['pa_taglia'] = $attr_size;
+                        $attributes['pa_size'] = $attr_size;
                 }
 
                 $product->set_attributes( $attributes );
@@ -1129,7 +1129,7 @@ class BSI_Importer {
         /**
          * Получить ID глобального атрибута по slug.
          *
-         * @param string $slug Slug атрибута (например 'colore' или 'pa_colore').
+         * @param string $slug Slug атрибута (например 'colore' или 'pa_color').
          * @return int
          */
         private function get_attribute_id( $slug ) {
@@ -1153,7 +1153,7 @@ class BSI_Importer {
          * Создать или получить терм атрибута в глобальной таксономии.
          *
          * @param string $name     Имя (например 'BLACK' или 'XXL').
-         * @param string $taxonomy Таксономия ('pa_colore' или 'pa_taglia').
+         * @param string $taxonomy Таксономия ('pa_color' или 'pa_size').
          * @return string slug терма (или пустая строка при ошибке).
          */
         private function ensure_attribute_term( $name, $taxonomy ) {
@@ -1216,13 +1216,13 @@ class BSI_Importer {
                         $stock = isset( $row['Disponibilita'] ) ? (float) $row['Disponibilita'] : 0;
                         if ( $stock > 0 ) {
                                 if ( ! empty( $row['DSColore'] ) && empty( $default_color ) ) {
-                                        $color_slug = $this->ensure_attribute_term( $row['DSColore'], 'pa_colore' );
+                                        $color_slug = $this->ensure_attribute_term( $row['DSColore'], 'pa_color' );
                                         if ( $color_slug ) {
                                                 $default_color = $color_slug;
                                         }
                                 }
                                 if ( ! empty( $row['Taglia'] ) && empty( $default_size ) ) {
-                                        $size_slug = $this->ensure_attribute_term( $row['Taglia'], 'pa_taglia' );
+                                        $size_slug = $this->ensure_attribute_term( $row['Taglia'], 'pa_size' );
                                         if ( $size_slug ) {
                                                 $default_size = $size_slug;
                                         }
@@ -1235,18 +1235,18 @@ class BSI_Importer {
 
                 // Если не нашли в наличии — берём первую вариацию.
                 if ( empty( $default_color ) && ! empty( $variant_rows[0]['DSColore'] ) ) {
-                        $default_color = $this->ensure_attribute_term( $variant_rows[0]['DSColore'], 'pa_colore' );
+                        $default_color = $this->ensure_attribute_term( $variant_rows[0]['DSColore'], 'pa_color' );
                 }
                 if ( empty( $default_size ) && ! empty( $variant_rows[0]['Taglia'] ) ) {
-                        $default_size = $this->ensure_attribute_term( $variant_rows[0]['Taglia'], 'pa_taglia' );
+                        $default_size = $this->ensure_attribute_term( $variant_rows[0]['Taglia'], 'pa_size' );
                 }
 
                 $default_attrs = array();
                 if ( $default_color ) {
-                        $default_attrs['pa_colore'] = $default_color;
+                        $default_attrs['pa_color'] = $default_color;
                 }
                 if ( $default_size ) {
-                        $default_attrs['pa_taglia'] = $default_size;
+                        $default_attrs['pa_size'] = $default_size;
                 }
 
                 if ( ! empty( $default_attrs ) ) {
@@ -1282,16 +1282,16 @@ class BSI_Importer {
                 $attrs = array();
 
                 if ( ! empty( $row['DSColore'] ) ) {
-                        $color_slug = $this->ensure_attribute_term( $row['DSColore'], 'pa_colore' );
+                        $color_slug = $this->ensure_attribute_term( $row['DSColore'], 'pa_color' );
                         if ( $color_slug ) {
-                                $attrs['pa_colore'] = $color_slug;
+                                $attrs['pa_color'] = $color_slug;
                         }
                 }
 
                 if ( ! empty( $row['Taglia'] ) ) {
-                        $size_slug = $this->ensure_attribute_term( $row['Taglia'], 'pa_taglia' );
+                        $size_slug = $this->ensure_attribute_term( $row['Taglia'], 'pa_size' );
                         if ( $size_slug ) {
-                                $attrs['pa_taglia'] = $size_slug;
+                                $attrs['pa_size'] = $size_slug;
                         }
                 }
 

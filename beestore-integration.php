@@ -3,7 +3,7 @@
  * Plugin Name:       BeeStore Integration for WooCommerce
  * Plugin URI:        https://github.com/Botssman/beestore-integration
  * Description:       Интеграция WooCommerce с BeeStore (Sirio Informatica): импорт каталога из CSV-выгрузки FTP, синхронизация остатков, передача заказов через SOAP (fInserimentoPrenotazione), обратная синхронизация статусов и tracking number, отмена/доплата заказа, конвертация цен и картинок в WebP, гибкие фильтры импорта по категориям и брендам.
- * Version:           1.4.1
+ * Version:           1.4.2
  * Author:            Kirill Andreev
  * License:           GPL-2.0+
  * Text Domain:       beestore-integration

@@ -83,7 +83,7 @@ class BSI_Installer {
         }
 
         /**
-         * Регистрация глобальных атрибутов WooCommerce (pa_colore, pa_taglia).
+         * Регистрация глобальных атрибутов WooCommerce (pa_color, pa_size).
          *
          * Без этого вариации не привязываются к значениям атрибутов.
          */
@@ -93,8 +93,8 @@ class BSI_Installer {
                 }
 
                 $attributes_to_create = array(
-                        'colore'     => __( 'Colore', 'beestore-integration' ),
-                        'taglia'     => __( 'Taglia', 'beestore-integration' ),
+                        'color'      => __( 'Color', 'beestore-integration' ),
+                        'size'       => __( 'Size', 'beestore-integration' ),
                         'brand'      => __( 'Бренд', 'beestore-integration' ),
                         'stagione'   => __( 'Сезон', 'beestore-integration' ),
                         'country'    => __( 'Страна', 'beestore-integration' ),

@@ -189,26 +189,42 @@ class BSI_Settings {
                         $output['import_filter_mode'] = 'all';
                 }
 
-                // Фильтр категорий: [category_name => limit].
+                // Фильтр категорий: парсим текстовое поле (одна категория на строку, лимит через |).
                 $output['import_filter_categories'] = array();
-                if ( isset( $input['import_filter_categories'] ) && is_array( $input['import_filter_categories'] ) ) {
-                        foreach ( $input['import_filter_categories'] as $cat_name => $limit ) {
-                                $cat_name = sanitize_text_field( $cat_name );
-                                $limit    = '' === $limit ? 0 : absint( $limit );
-                                if ( $cat_name ) {
-                                        $output['import_filter_categories'][ $cat_name ] = $limit;
+                $cats_text = isset( $input['filter_cats_text'] ) ? wp_unslash( $input['filter_cats_text'] ) : '';
+                if ( $cats_text ) {
+                        $lines = explode( "\n", $cats_text );
+                        foreach ( $lines as $line ) {
+                                $line = trim( $line );
+                                if ( '' === $line ) {
+                                        continue;
+                                }
+                                $parts = explode( '|', $line );
+                                $name  = trim( $parts[0] );
+                                $limit = isset( $parts[1] ) ? trim( $parts[1] ) : '0';
+                                $limit = '' === $limit ? 0 : absint( $limit );
+                                if ( $name ) {
+                                        $output['import_filter_categories'][ $name ] = $limit;
                                 }
                         }
                 }
 
-                // Фильтр брендов: [brand_name => limit].
+                // Фильтр брендов: парсим текстовое поле.
                 $output['import_filter_brands'] = array();
-                if ( isset( $input['import_filter_brands'] ) && is_array( $input['import_filter_brands'] ) ) {
-                        foreach ( $input['import_filter_brands'] as $brand_name => $limit ) {
-                                $brand_name = sanitize_text_field( $brand_name );
-                                $limit      = '' === $limit ? 0 : absint( $limit );
-                                if ( $brand_name ) {
-                                        $output['import_filter_brands'][ $brand_name ] = $limit;
+                $brands_text = isset( $input['filter_brands_text'] ) ? wp_unslash( $input['filter_brands_text'] ) : '';
+                if ( $brands_text ) {
+                        $lines = explode( "\n", $brands_text );
+                        foreach ( $lines as $line ) {
+                                $line = trim( $line );
+                                if ( '' === $line ) {
+                                        continue;
+                                }
+                                $parts = explode( '|', $line );
+                                $name  = trim( $parts[0] );
+                                $limit = isset( $parts[1] ) ? trim( $parts[1] ) : '0';
+                                $limit = '' === $limit ? 0 : absint( $limit );
+                                if ( $name ) {
+                                        $output['import_filter_brands'][ $name ] = $limit;
                                 }
                         }
                 }

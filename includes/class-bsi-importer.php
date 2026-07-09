@@ -125,14 +125,38 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Импорт уже идёт. Обновите страницу.', 'beestore-integration' ) ) );
                 }
 
-                // Скачиваем файл с FTP.
-                $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
-                if ( is_wp_error( $fetch_result ) ) {
-                        wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
+                // СНАЧАЛА ищем уже скачанный CSV во всех папках.
+                $upload_dir    = wp_upload_dir();
+                $beestore_dir  = trailingslashit( $upload_dir['basedir'] ) . 'beestore';
+                $dirs_to_check = array( 'downloads', 'extracted', 'processed', 'manual-downloads' );
+
+                $csvs = array();
+                foreach ( $dirs_to_check as $subdir ) {
+                        $path = $beestore_dir . '/' . $subdir;
+                        if ( is_dir( $path ) ) {
+                                $csvs = array_merge( $csvs, glob( $path . '/*.csv' ) );
+                                $csvs = array_merge( $csvs, glob( $path . '/*/*.csv' ) );
+                        }
                 }
 
-                $csv_file = $fetch_result['csv'];
-                $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
+                if ( ! empty( $csvs ) ) {
+                        usort( $csvs, function( $a, $b ) {
+                                return filemtime( $b ) - filemtime( $a );
+                        });
+                        $csv_file   = $csvs[0];
+                        $remote_name = basename( $csv_file );
+                } else {
+                        // CSV нет — скачиваем с FTP.
+                        if ( function_exists( 'set_time_limit' ) ) {
+                                @set_time_limit( 600 );
+                        }
+                        $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
+                        if ( is_wp_error( $fetch_result ) ) {
+                                wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
+                        }
+                        $csv_file    = $fetch_result['csv'];
+                        $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
+                }
 
                 // Считаем количество строк.
                 $count_result = BSI_CSV_Parser::instance()->count_lines( $csv_file );
@@ -623,7 +647,7 @@ class BSI_Importer {
                 // Ищем скачанный CSV во всех папках плагина.
                 $upload_dir    = wp_upload_dir();
                 $beestore_dir  = trailingslashit( $upload_dir['basedir'] ) . 'beestore';
-                $dirs_to_check = array( 'downloads', 'extracted', 'processed' );
+                $dirs_to_check = array( 'downloads', 'extracted', 'processed', 'manual-downloads' );
 
                 $csvs = array();
                 foreach ( $dirs_to_check as $subdir ) {

@@ -1047,6 +1047,13 @@ class BSI_Importer {
 
                 $attributes = array();
 
+                // ВАЖНО: убедимся что таксономии pa_color и pa_size существуют.
+                // Без этого атрибуты сохранятся как кастомные (data-taxonomy=""),
+                // и WooCommerce не свяжет их с вариациями → пустой <select>.
+                if ( ! taxonomy_exists( 'pa_color' ) ) {
+                        BSI_Installer::register_attributes();
+                }
+
                 if ( ! empty( $colors ) ) {
                         // Создаём термы в pa_color и собираем их slug'и.
                         $color_slugs = array();

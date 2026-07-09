@@ -1048,45 +1048,43 @@ class BSI_Importer {
                 $attributes = array();
 
                 // ВАЖНО: убедимся что таксономии pa_color и pa_size существуют.
-                // Без этого атрибуты сохранятся как кастомные (data-taxonomy=""),
-                // и WooCommerce не свяжет их с вариациями → пустой <select>.
                 if ( ! taxonomy_exists( 'pa_color' ) ) {
                         BSI_Installer::register_attributes();
                 }
 
                 if ( ! empty( $colors ) ) {
-                        // Создаём термы в pa_color и собираем их slug'и.
-                        $color_slugs = array();
+                        // Создаём термы и собираем их TERM IDs (не slug'и!).
+                        // WooCommerce для таксономий ждёт IDs в set_options().
+                        $color_term_ids = array();
                         foreach ( $colors as $color_name ) {
-                                $slug = $this->ensure_attribute_term( $color_name, 'pa_color' );
-                                if ( $slug ) {
-                                        $color_slugs[] = $slug;
+                                $term_id = $this->ensure_attribute_term_id( $color_name, 'pa_color' );
+                                if ( $term_id ) {
+                                        $color_term_ids[] = $term_id;
                                 }
                         }
 
                         $attr_color = new WC_Product_Attribute();
                         $attr_color->set_id( $this->get_attribute_id( 'pa_color' ) );
                         $attr_color->set_name( 'pa_color' );
-                        $attr_color->set_options( $color_slugs );
+                        $attr_color->set_options( $color_term_ids );
                         $attr_color->set_position( 1 );
                         $attr_color->set_visible( true );
                         $attr_color->set_variation( true );
                         $attributes['pa_color'] = $attr_color;
                 }
                 if ( ! empty( $sizes ) ) {
-                        // Создаём термы в pa_size.
-                        $size_slugs = array();
+                        $size_term_ids = array();
                         foreach ( $sizes as $size_name ) {
-                                $slug = $this->ensure_attribute_term( $size_name, 'pa_size' );
-                                if ( $slug ) {
-                                        $size_slugs[] = $slug;
+                                $term_id = $this->ensure_attribute_term_id( $size_name, 'pa_size' );
+                                if ( $term_id ) {
+                                        $size_term_ids[] = $term_id;
                                 }
                         }
 
                         $attr_size = new WC_Product_Attribute();
                         $attr_size->set_id( $this->get_attribute_id( 'pa_size' ) );
                         $attr_size->set_name( 'pa_size' );
-                        $attr_size->set_options( $size_slugs );
+                        $attr_size->set_options( $size_term_ids );
                         $attr_size->set_position( 2 );
                         $attr_size->set_visible( true );
                         $attr_size->set_variation( true );
@@ -1196,6 +1194,41 @@ class BSI_Importer {
                 }
 
                 return $attr_id;
+        }
+
+        /**
+         * Создать или получить терм атрибута — возвращает TERM ID (не slug).
+         *
+         * @param string $name     Имя (например 'BLACK' или 'XXL').
+         * @param string $taxonomy Таксономия ('pa_color' или 'pa_size').
+         * @return int term_id или 0 при ошибке.
+         */
+        private function ensure_attribute_term_id( $name, $taxonomy ) {
+                $name = trim( $name );
+                if ( empty( $name ) ) {
+                        return 0;
+                }
+
+                if ( ! taxonomy_exists( $taxonomy ) ) {
+                        $this->log( 'warning', 'Таксономия не существует', array( 'taxonomy' => $taxonomy ) );
+                        return 0;
+                }
+
+                $existing = term_exists( $name, $taxonomy );
+                if ( is_array( $existing ) && isset( $existing['term_id'] ) ) {
+                        return (int) $existing['term_id'];
+                }
+
+                $result = wp_insert_term( $name, $taxonomy );
+                if ( is_wp_error( $result ) ) {
+                        $this->log( 'warning', 'Не удалось создать терм', array(
+                                'name'     => $name,
+                                'taxonomy' => $taxonomy,
+                                'error'    => $result->get_error_message(),
+                        ) );
+                        return 0;
+                }
+                return (int) $result['term_id'];
         }
 
         /**

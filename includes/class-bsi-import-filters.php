@@ -208,8 +208,9 @@ class BSI_Import_Filters {
         public function init_scan( $csv_file ) {
                 $state = array(
                         'file'      => $csv_file,
-                        'offset'    => 0,
+                        'file_pos'  => 0,
                         'total'     => BSI_CSV_Parser::instance()->count_lines( $csv_file ),
+                        'processed' => 0,
                         'macro'     => array(),
                         'sub'       => array(),
                         'brands'    => array(),
@@ -220,9 +221,9 @@ class BSI_Import_Filters {
 
         /**
          * Сканировать один батч CSV (5000 строк).
-         * Сохраняет найденные категории и бренды в опцию.
+         * Использует fseek() для прямого позиционирования — НЕ читает файл с начала!
          *
-         * @return array|WP_Error ['done' => bool, 'processed' => int, 'total' => int]
+         * @return array|WP_Error
          */
         public function scan_batch() {
                 $state = get_option( 'bsi_scan_state', array() );
@@ -230,31 +231,58 @@ class BSI_Import_Filters {
                         return new WP_Error( 'bsi_no_file', 'CSV файл не найден.' );
                 }
 
-                $parser = BSI_CSV_Parser::instance()->open( $state['file'] );
-                if ( is_wp_error( $parser ) ) {
-                        return $parser;
+                $handle = fopen( $state['file'], 'rb' );
+                if ( ! $handle ) {
+                        return new WP_Error( 'bsi_open', 'Не удалось открыть CSV.' );
                 }
 
-                $skip   = (int) $state['offset'];
-                $batch  = 5000;
-                $current = 0;
+                // Пропускаем BOM.
+                $bom = fread( $handle, 3 );
+                if ( "\xEF\xBB\xBF" !== $bom ) {
+                        fseek( $handle, 0 );
+                }
 
-                $macro  = $state['macro'];
-                $sub    = $state['sub'];
-                $brands = $state['brands'];
-
-                foreach ( $parser as $idx => $row ) {
-                        $current++;
-                        if ( $current <= $skip ) {
-                                continue;
+                // Восстанавливаем позицию файла (быстрое позиционирование через fseek).
+                $file_pos = isset( $state['file_pos'] ) ? (int) $state['file_pos'] : 0;
+                if ( $file_pos > 0 ) {
+                        fseek( $handle, $file_pos );
+                } else {
+                        // Первая итерация — читаем заголовок.
+                        $headers = fgetcsv( $handle, 0, ',', '"' );
+                        if ( ! $headers ) {
+                                fclose( $handle );
+                                return new WP_Error( 'bsi_no_headers', 'Не удалось прочитать заголовок CSV.' );
                         }
+                        $headers = array_map( 'trim', $headers );
+                }
+
+                $batch  = 5000;
+                $count  = 0;
+
+                $macro  = isset( $state['macro'] ) ? $state['macro'] : array();
+                $sub    = isset( $state['sub'] ) ? $state['sub'] : array();
+                $brands = isset( $state['brands'] ) ? $state['brands'] : array();
+
+                while ( ! feof( $handle ) && $count < $batch ) {
+                        $row = fgetcsv( $handle, 0, ',', '"' );
+                        if ( false === $row || null === $row ) {
+                                break;
+                        }
+
+                        // Ассоциативный массив.
+                        $row_data = array();
+                        foreach ( $headers as $i => $h ) {
+                                $row_data[ $h ] = isset( $row[ $i ] ) ? trim( $row[ $i ] ) : '';
+                        }
+
+                        $count++;
 
                         // Макро-категория.
                         $macro_name = '';
-                        if ( ! empty( $row['DSRepartoWeb'] ) ) {
-                                $macro_name = $row['DSRepartoWeb'];
-                        } elseif ( ! empty( $row['DSReparto'] ) ) {
-                                $macro_name = $row['DSReparto'];
+                        if ( ! empty( $row_data['DSRepartoWeb'] ) ) {
+                                $macro_name = $row_data['DSRepartoWeb'];
+                        } elseif ( ! empty( $row_data['DSReparto'] ) ) {
+                                $macro_name = $row_data['DSReparto'];
                         }
                         if ( $macro_name ) {
                                 if ( ! isset( $macro[ $macro_name ] ) ) {
@@ -265,10 +293,10 @@ class BSI_Import_Filters {
 
                         // Подкатегория.
                         $sub_name = '';
-                        if ( ! empty( $row['DSCategoriaMerceologicaWeb'] ) ) {
-                                $sub_name = $row['DSCategoriaMerceologicaWeb'];
-                        } elseif ( ! empty( $row['DSCategoriaMerceologica'] ) ) {
-                                $sub_name = $row['DSCategoriaMerceologica'];
+                        if ( ! empty( $row_data['DSCategoriaMerceologicaWeb'] ) ) {
+                                $sub_name = $row_data['DSCategoriaMerceologicaWeb'];
+                        } elseif ( ! empty( $row_data['DSCategoriaMerceologica'] ) ) {
+                                $sub_name = $row_data['DSCategoriaMerceologica'];
                         }
                         if ( $sub_name ) {
                                 if ( ! isset( $sub[ $sub_name ] ) ) {
@@ -282,10 +310,10 @@ class BSI_Import_Filters {
 
                         // Бренд.
                         $brand = '';
-                        if ( ! empty( $row['DSLinea'] ) ) {
-                                $brand = $row['DSLinea'];
-                        } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
-                                $brand = $row['RaggruppamentoLinea'];
+                        if ( ! empty( $row_data['DSLinea'] ) ) {
+                                $brand = $row_data['DSLinea'];
+                        } elseif ( ! empty( $row_data['RaggruppamentoLinea'] ) ) {
+                                $brand = $row_data['RaggruppamentoLinea'];
                         }
                         if ( $brand ) {
                                 if ( ! isset( $brands[ $brand ] ) ) {
@@ -293,26 +321,27 @@ class BSI_Import_Filters {
                                 }
                                 $brands[ $brand ]++;
                         }
-
-                        if ( $current >= $skip + $batch ) {
-                                break;
-                        }
                 }
-                $parser->close();
 
-                $state['offset'] = $current;
-                $state['macro']  = $macro;
-                $state['sub']    = $sub;
-                $state['brands'] = $brands;
+                // Сохраняем позицию файла для следующего батча.
+                $new_pos = ftell( $handle );
+                $at_eof  = feof( $handle );
+                fclose( $handle );
 
-                $done = ( $current >= (int) $state['total'] );
+                $state['file_pos']  = $new_pos;
+                $state['processed'] = ( isset( $state['processed'] ) ? (int) $state['processed'] : 0 ) + $count;
+                $state['macro']     = $macro;
+                $state['sub']       = $sub;
+                $state['brands']    = $brands;
+
+                $done = $at_eof || ( 0 === $count );
                 $state['scanning'] = ! $done;
 
                 update_option( 'bsi_scan_state', $state, false );
 
                 return array(
                         'done'      => $done,
-                        'processed' => $current,
+                        'processed' => $state['processed'],
                         'total'     => (int) $state['total'],
                 );
         }

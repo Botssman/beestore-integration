@@ -56,6 +56,9 @@ $fixed_markup            = isset( $settings['fixed_markup'] ) ? $settings['fixed
 $supplier_currency       = isset( $settings['supplier_currency'] ) ? $settings['supplier_currency'] : 'EUR';
 $shop_currency           = isset( $settings['shop_currency'] ) ? $settings['shop_currency'] : 'RUB';
 $round_prices            = isset( $settings['round_prices'] ) && '1' === $settings['round_prices'];
+$webp_enabled            = isset( $settings['webp_enabled'] ) && '1' === $settings['webp_enabled'];
+$webp_strategy           = isset( $settings['webp_strategy'] ) ? $settings['webp_strategy'] : 3;
+$webp_supports           = class_exists( 'BSI_WebP' ) ? BSI_WebP::instance()->server_supports() : false;
 
 // Текущий курс через BSI_Currency (для отображения).
 $current_rate_info = class_exists( 'BSI_Currency' ) ? BSI_Currency::instance()->get_current_rate() : array(
@@ -97,6 +100,31 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                         <th><label for="ftp_host"><?php esc_html_e( 'FTP/SFTP хост', 'beestore-integration' ); ?></label></th>
                                         <td>
                                                 <input type="text" name="bsi_settings[ftp_host]" id="ftp_host" value="<?php echo esc_attr( $ftp_host ); ?>" class="regular-text" placeholder="ftp.example.com">
+                                        </td>
+                                </tr>
+
+                                <tr>
+                                        <th>Конвертировать в WebP</th>
+                                        <td>
+                                                <label>
+                                                        <input type="checkbox" name="bsi_settings[webp_enabled]" value="1" <?php checked( $webp_enabled ); ?>>
+                                                        При скачивании конвертировать в WebP и удалить оригинал
+                                                </label>
+                                                <p class="description">WebP сжимает картинки на 30-50% без потери качества.</p>
+                                                <?php if ( ! $webp_supports ) : ?>
+                                                        <p style="color:#c62828;font-weight:600;">⚠ Сервер не поддерживает WebP!</p>
+                                                <?php else : ?>
+                                                        <label style="display:block;margin-top:8px;">
+                                                                Стратегия:
+                                                                <select name="bsi_settings[webp_strategy]">
+                                                                        <option value="3" <?php selected( $webp_strategy, 3 ); ?>>3 — Сбалансированно (рекомендуется)</option>
+                                                                        <option value="1" <?php selected( $webp_strategy, 1 ); ?>>1 — Макс. компрессия</option>
+                                                                        <option value="2" <?php selected( $webp_strategy, 2 ); ?>>2 — Высокая компрессия</option>
+                                                                        <option value="4" <?php selected( $webp_strategy, 4 ); ?>>4 — Высокое качество</option>
+                                                                        <option value="5" <?php selected( $webp_strategy, 5 ); ?>>5 — Lossless</option>
+                                                                </select>
+                                                        </label>
+                                                <?php endif; ?>
                                         </td>
                                 </tr>
                                 <tr>

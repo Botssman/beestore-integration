@@ -620,18 +620,23 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
                 }
 
-                // Ищем скачанный CSV.
+                // Ищем скачанный CSV во всех папках плагина.
                 $upload_dir    = wp_upload_dir();
-                $downloads_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/downloads';
-                $extracted_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/extracted';
+                $beestore_dir  = trailingslashit( $upload_dir['basedir'] ) . 'beestore';
+                $dirs_to_check = array( 'downloads', 'extracted', 'processed' );
 
-                $csvs = glob( $downloads_dir . '/*.csv' );
-                if ( empty( $csvs ) && is_dir( $extracted_dir ) ) {
-                        $csvs = glob( $extracted_dir . '/*/*.csv' );
+                $csvs = array();
+                foreach ( $dirs_to_check as $subdir ) {
+                        $path = $beestore_dir . '/' . $subdir;
+                        if ( is_dir( $path ) ) {
+                                $csvs = array_merge( $csvs, glob( $path . '/*.csv' ) );
+                                // Также проверяем подпапки (extracted/COMPANY.../file.csv).
+                                $csvs = array_merge( $csvs, glob( $path . '/*/*.csv' ) );
+                        }
                 }
 
                 if ( empty( $csvs ) ) {
-                        // Пробуем скачать с FTP.
+                        // CSV нет — скачиваем с FTP.
                         if ( function_exists( 'set_time_limit' ) ) {
                                 @set_time_limit( 600 );
                         }
@@ -641,6 +646,10 @@ class BSI_Importer {
                         }
                         $csv_file = $fetch_result['csv'];
                 } else {
+                        // Берём самый свежий CSV (по дате изменения).
+                        usort( $csvs, function( $a, $b ) {
+                                return filemtime( $b ) - filemtime( $a );
+                        });
                         $csv_file = $csvs[0];
                 }
 

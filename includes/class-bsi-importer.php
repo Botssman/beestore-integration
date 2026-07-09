@@ -1123,6 +1123,26 @@ class BSI_Importer {
                 // иначе просто первую.
                 $this->set_default_variation( $product_id, $variant_rows );
 
+                // Принудительная синхронизация — без этого вариации не появятся
+                // на странице товара до ручного "Обновить" в админке.
+                $product_obj = wc_get_product( $product_id );
+                if ( $product_obj && $product_obj instanceof WC_Product_Variable ) {
+                        // Синхронизируем цены и наличие.
+                        WC_Product_Variable::sync_stock_status( $product_id );
+                        // Перестраиваем атрибуты вариаций.
+                        $children = $product_obj->get_children();
+                        foreach ( $children as $child_id ) {
+                                $variation = wc_get_product( $child_id );
+                                if ( $variation ) {
+                                        $variation->save();
+                                }
+                        }
+                }
+
+                // Сбрасываем кэш товара.
+                wc_delete_product_transients( $product_id );
+                clean_post_cache( $product_id );
+
                 return $product_id;
         }
 

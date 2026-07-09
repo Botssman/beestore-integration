@@ -1047,9 +1047,25 @@ class BSI_Importer {
 
                 $attributes = array();
 
-                // ВАЖНО: убедимся что таксономии pa_color и pa_size существуют.
-                if ( ! taxonomy_exists( 'pa_color' ) ) {
-                        BSI_Installer::register_attributes();
+                // ВАЖНО: регистрируем таксономии pa_color и pa_size в текущем запросе.
+                // WooCommerce регистрирует их только на хуке init, но AJAX-запрос
+                // может пропустить это. Без register_taxonomy() → is_taxonomy()=false
+                // → атрибуты сохраняются как кастомные → пустой <select>.
+                foreach ( array( 'pa_color', 'pa_size' ) as $tax_name ) {
+                        if ( ! taxonomy_exists( $tax_name ) ) {
+                                // Сначала убедимся что атрибут есть в таблице wc_attribute_taxonomies.
+                                BSI_Installer::register_attributes();
+                                // Затем регистрируем таксономию в текущем запросе.
+                                $label = ( 'pa_color' === $tax_name ) ? 'Color' : 'Size';
+                                register_taxonomy( $tax_name, array( 'product' ), array(
+                                        'labels'       => array( 'name' => $label ),
+                                        'hierarchical' => true,
+                                        'show_ui'      => false,
+                                        'query_var'    => true,
+                                        'rewrite'      => false,
+                                ) );
+                                register_taxonomy_for_object_type( $tax_name, 'product' );
+                        }
                 }
 
                 if ( ! empty( $colors ) ) {

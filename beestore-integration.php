@@ -1,10 +1,10 @@
 <?php
 /**
  * Plugin Name:       BeeStore Integration for WooCommerce
- * Plugin URI:        https://github.com/your-org/beestore-integration
- * Description:       Интеграция WooCommerce с BeeStore (Sirio Informatica): импорт каталога из CSV-выгрузки FTP, синхронизация остатков, передача заказов через SOAP (fInserimentoPrenotazione), обратная синхронизация статусов и tracking number, отмена/доплата заказа.
- * Version:           1.0.0
- * Author:            Your Company
+ * Plugin URI:        https://github.com/Botssman/beestore-integration
+ * Description:       Интеграция WooCommerce с BeeStore (Sirio Informatica): импорт каталога из CSV-выгрузки FTP, синхронизация остатков, передача заказов через SOAP (fInserimentoPrenotazione), обратная синхронизация статусов и tracking number, отмена/доплата заказа, конвертация цен и картинок в WebP, гибкие фильтры импорта по категориям и брендам.
+ * Version:           1.2.8
+ * Author:            Baylico OÜ
  * License:           GPL-2.0+
  * Text Domain:       beestore-integration
  * Domain Path:       /languages
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /* -------------------------------------------------------------------------
  * Константы плагина
  * ------------------------------------------------------------------------- */
-define( 'BSI_VERSION', '1.0.0' );
+define( 'BSI_VERSION', '1.2.8' );
 define( 'BSI_PLUGIN_FILE', __FILE__ );
 define( 'BSI_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'BSI_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

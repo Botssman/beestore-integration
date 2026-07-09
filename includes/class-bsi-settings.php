@@ -189,44 +189,32 @@ class BSI_Settings {
                         $output['import_filter_mode'] = 'all';
                 }
 
-                // Фильтр категорий: парсим текстовое поле (одна категория на строку, лимит через |).
+                // Фильтр категорий: чекбокс (filter_cat_check) + лимит (filter_cat_limit).
                 $output['import_filter_categories'] = array();
-                $cats_text = isset( $input['filter_cats_text'] ) ? wp_unslash( $input['filter_cats_text'] ) : '';
-                if ( $cats_text ) {
-                        $lines = explode( "\n", $cats_text );
-                        foreach ( $lines as $line ) {
-                                $line = trim( $line );
-                                if ( '' === $line ) {
-                                        continue;
-                                }
-                                $parts = explode( '|', $line );
-                                $name  = trim( $parts[0] );
-                                $limit = isset( $parts[1] ) ? trim( $parts[1] ) : '0';
-                                $limit = '' === $limit ? 0 : absint( $limit );
-                                if ( $name ) {
-                                        $output['import_filter_categories'][ $name ] = $limit;
-                                }
+                $cat_checks = isset( $input['filter_cat_check'] ) && is_array( $input['filter_cat_check'] ) ? $input['filter_cat_check'] : array();
+                $cat_limits = isset( $input['filter_cat_limit'] ) && is_array( $input['filter_cat_limit'] ) ? $input['filter_cat_limit'] : array();
+                foreach ( $cat_checks as $cat_name => $checked ) {
+                        $cat_name = sanitize_text_field( $cat_name );
+                        if ( ! $cat_name ) {
+                                continue;
                         }
+                        $limit = isset( $cat_limits[ $cat_name ] ) ? $cat_limits[ $cat_name ] : 0;
+                        $limit = '' === $limit ? 0 : absint( $limit );
+                        $output['import_filter_categories'][ $cat_name ] = $limit;
                 }
 
-                // Фильтр брендов: парсим текстовое поле.
+                // Фильтр брендов: чекбокс (filter_brand_check) + лимит (filter_brand_limit).
                 $output['import_filter_brands'] = array();
-                $brands_text = isset( $input['filter_brands_text'] ) ? wp_unslash( $input['filter_brands_text'] ) : '';
-                if ( $brands_text ) {
-                        $lines = explode( "\n", $brands_text );
-                        foreach ( $lines as $line ) {
-                                $line = trim( $line );
-                                if ( '' === $line ) {
-                                        continue;
-                                }
-                                $parts = explode( '|', $line );
-                                $name  = trim( $parts[0] );
-                                $limit = isset( $parts[1] ) ? trim( $parts[1] ) : '0';
-                                $limit = '' === $limit ? 0 : absint( $limit );
-                                if ( $name ) {
-                                        $output['import_filter_brands'][ $name ] = $limit;
-                                }
+                $brand_checks = isset( $input['filter_brand_check'] ) && is_array( $input['filter_brand_check'] ) ? $input['filter_brand_check'] : array();
+                $brand_limits = isset( $input['filter_brand_limit'] ) && is_array( $input['filter_brand_limit'] ) ? $input['filter_brand_limit'] : array();
+                foreach ( $brand_checks as $brand_name => $checked ) {
+                        $brand_name = sanitize_text_field( $brand_name );
+                        if ( ! $brand_name ) {
+                                continue;
                         }
+                        $limit = isset( $brand_limits[ $brand_name ] ) ? $brand_limits[ $brand_name ] : 0;
+                        $limit = '' === $limit ? 0 : absint( $limit );
+                        $output['import_filter_brands'][ $brand_name ] = $limit;
                 }
 
                 return $output;

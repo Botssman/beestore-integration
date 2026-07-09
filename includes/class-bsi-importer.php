@@ -54,6 +54,10 @@ class BSI_Importer {
 
                 // AJAX: скачать CSV с FTP для настройки фильтров (без запуска импорта).
                 add_action( 'wp_ajax_bsi_download_csv_for_filters', array( $this, 'ajax_download_csv_for_filters' ) );
+
+                // AJAX: батчевое сканирование CSV для фильтров.
+                add_action( 'wp_ajax_bsi_scan_start', array( $this, 'ajax_scan_start' ) );
+                add_action( 'wp_ajax_bsi_scan_step', array( $this, 'ajax_scan_step' ) );
         }
 
         /* ---------------------------------------------------------------------
@@ -605,6 +609,62 @@ class BSI_Importer {
                         'categories' => $available['categories'],
                         'brands'     => $available['brands'],
                 ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: батчевое сканирование CSV для фильтров.
+         * --------------------------------------------------------------------- */
+        public function ajax_scan_start() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                // Ищем скачанный CSV.
+                $upload_dir    = wp_upload_dir();
+                $downloads_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/downloads';
+                $extracted_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore/extracted';
+
+                $csvs = glob( $downloads_dir . '/*.csv' );
+                if ( empty( $csvs ) && is_dir( $extracted_dir ) ) {
+                        $csvs = glob( $extracted_dir . '/*/*.csv' );
+                }
+
+                if ( empty( $csvs ) ) {
+                        // Пробуем скачать с FTP.
+                        if ( function_exists( 'set_time_limit' ) ) {
+                                @set_time_limit( 600 );
+                        }
+                        $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
+                        if ( is_wp_error( $fetch_result ) ) {
+                                wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
+                        }
+                        $csv_file = $fetch_result['csv'];
+                } else {
+                        $csv_file = $csvs[0];
+                }
+
+                BSI_Import_Filters::instance()->init_scan( $csv_file );
+
+                wp_send_json_success( array(
+                        'message' => 'Сканирование началось...',
+                        'file'    => basename( $csv_file ),
+                ) );
+        }
+
+        public function ajax_scan_step() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $result = BSI_Import_Filters::instance()->scan_batch();
+
+                if ( is_wp_error( $result ) ) {
+                        wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+                }
+
+                wp_send_json_success( $result );
         }
 
         /* ---------------------------------------------------------------------

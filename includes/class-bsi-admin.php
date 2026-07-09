@@ -448,6 +448,7 @@ class BSI_Admin {
         public function render_filters_page() {
                 $filters  = BSI_Import_Filters::instance()->get_settings();
                 $settings = get_option( 'bsi_settings', array() );
+                $scan     = BSI_Import_Filters::instance()->get_scan_results();
                 include BSI_PLUGIN_DIR . 'templates/filters-page.php';
         }
 }

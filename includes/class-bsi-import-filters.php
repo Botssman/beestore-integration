@@ -200,27 +200,56 @@ class BSI_Import_Filters {
         }
 
         /**
-         * Получить список всех уникальных макро-категорий (DSRepartoWeb) и
-         * подкатегорий (DSCategoriaMerceologicaWeb) из CSV-файла.
+         * Инициализация сканирования CSV.
+         * Сохраняет путь к файлу и сбрасывает результаты.
          *
-         * Структура результата:
-         *   'macro' => ['CLOTHING' => 1500, 'SHOES' => 800, 'BAGS' => 300]
-         *   'sub'   => ['JEANS' => ['count' => 200, 'parent' => 'CLOTHING'], ...]
-         *
-         * @param string $csv_file Путь к CSV.
-         * @return array
+         * @param string $csv_file
          */
-        public function scan_csv_for_filters( $csv_file ) {
-                $macro = array();
-                $sub   = array();
+        public function init_scan( $csv_file ) {
+                $state = array(
+                        'file'      => $csv_file,
+                        'offset'    => 0,
+                        'total'     => BSI_CSV_Parser::instance()->count_lines( $csv_file ),
+                        'macro'     => array(),
+                        'sub'       => array(),
+                        'brands'    => array(),
+                        'scanning'  => true,
+                );
+                update_option( 'bsi_scan_state', $state, false );
+        }
 
-                $parser = BSI_CSV_Parser::instance()->open( $csv_file );
-                if ( is_wp_error( $parser ) ) {
-                        return array( 'macro' => array(), 'sub' => array() );
+        /**
+         * Сканировать один батч CSV (5000 строк).
+         * Сохраняет найденные категории и бренды в опцию.
+         *
+         * @return array|WP_Error ['done' => bool, 'processed' => int, 'total' => int]
+         */
+        public function scan_batch() {
+                $state = get_option( 'bsi_scan_state', array() );
+                if ( empty( $state['file'] ) || ! file_exists( $state['file'] ) ) {
+                        return new WP_Error( 'bsi_no_file', 'CSV файл не найден.' );
                 }
 
-                foreach ( $parser as $row ) {
-                        // Макро-категория (DSRepartoWeb — CLOTHING, SHOES, BAGS).
+                $parser = BSI_CSV_Parser::instance()->open( $state['file'] );
+                if ( is_wp_error( $parser ) ) {
+                        return $parser;
+                }
+
+                $skip   = (int) $state['offset'];
+                $batch  = 5000;
+                $current = 0;
+
+                $macro  = $state['macro'];
+                $sub    = $state['sub'];
+                $brands = $state['brands'];
+
+                foreach ( $parser as $idx => $row ) {
+                        $current++;
+                        if ( $current <= $skip ) {
+                                continue;
+                        }
+
+                        // Макро-категория.
                         $macro_name = '';
                         if ( ! empty( $row['DSRepartoWeb'] ) ) {
                                 $macro_name = $row['DSRepartoWeb'];
@@ -234,7 +263,7 @@ class BSI_Import_Filters {
                                 $macro[ $macro_name ]++;
                         }
 
-                        // Подкатегория (DSCategoriaMerceologicaWeb — JEANS, SNEAKERS, HANDBAGS).
+                        // Подкатегория.
                         $sub_name = '';
                         if ( ! empty( $row['DSCategoriaMerceologicaWeb'] ) ) {
                                 $sub_name = $row['DSCategoriaMerceologicaWeb'];
@@ -243,26 +272,61 @@ class BSI_Import_Filters {
                         }
                         if ( $sub_name ) {
                                 if ( ! isset( $sub[ $sub_name ] ) ) {
-                                        $sub[ $sub_name ] = array(
-                                                'count'  => 0,
-                                                'parent' => $macro_name,
-                                        );
+                                        $sub[ $sub_name ] = array( 'count' => 0, 'parent' => $macro_name );
                                 }
                                 $sub[ $sub_name ]['count']++;
                                 if ( $macro_name && empty( $sub[ $sub_name ]['parent'] ) ) {
                                         $sub[ $sub_name ]['parent'] = $macro_name;
                                 }
                         }
+
+                        // Бренд.
+                        $brand = '';
+                        if ( ! empty( $row['DSLinea'] ) ) {
+                                $brand = $row['DSLinea'];
+                        } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
+                                $brand = $row['RaggruppamentoLinea'];
+                        }
+                        if ( $brand ) {
+                                if ( ! isset( $brands[ $brand ] ) ) {
+                                        $brands[ $brand ] = 0;
+                                }
+                                $brands[ $brand ]++;
+                        }
+
+                        if ( $current >= $skip + $batch ) {
+                                break;
+                        }
                 }
                 $parser->close();
 
-                // Сортируем по алфавиту.
-                ksort( $macro );
-                ksort( $sub );
+                $state['offset'] = $current;
+                $state['macro']  = $macro;
+                $state['sub']    = $sub;
+                $state['brands'] = $brands;
+
+                $done = ( $current >= (int) $state['total'] );
+                $state['scanning'] = ! $done;
+
+                update_option( 'bsi_scan_state', $state, false );
 
                 return array(
-                        'macro' => $macro,
-                        'sub'   => $sub,
+                        'done'      => $done,
+                        'processed' => $current,
+                        'total'     => (int) $state['total'],
                 );
+        }
+
+        /**
+         * Получить результаты сканирования.
+         *
+         * @return array|false
+         */
+        public function get_scan_results() {
+                $state = get_option( 'bsi_scan_state', array() );
+                if ( empty( $state ) || ! empty( $state['scanning'] ) ) {
+                        return false;
+                }
+                return $state;
         }
 }

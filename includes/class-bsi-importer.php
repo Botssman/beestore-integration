@@ -1795,15 +1795,19 @@ class BSI_Importer {
          * Поиск товаров по meta.
          * --------------------------------------------------------------------- */
         private function find_product_by_meta( $key, $value ) {
-                $posts = get_posts( array(
-                        'post_type'      => array( 'product', 'product_variation' ),
-                        'posts_per_page' => 1,
-                        'post_status'    => 'any',
-                        'meta_key'       => $key, // phpcs:ignore
-                        'meta_value'     => $value, // phpcs:ignore
-                        'fields'         => 'ids',
+                // Ищем ТОЛЬКО среди товаров (post_type=product), НЕ среди вариаций!
+                // Иначе найдёт вариацию вместо родителя и создаст дубликат.
+                global $wpdb;
+                $found = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT post_id FROM {$wpdb->postmeta} pm
+                         JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                         WHERE pm.meta_key = %s AND pm.meta_value = %s
+                         AND p.post_type = 'product'
+                         LIMIT 1",
+                        $key,
+                        $value
                 ) );
-                return ! empty( $posts ) ? (int) $posts[0] : 0;
+                return $found ? (int) $found : 0;
         }
 
         private function find_variation_by_meta( $key, $value, $parent_id ) {

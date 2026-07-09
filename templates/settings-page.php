@@ -90,6 +90,7 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                         <a href="#bsi-ftp" class="nav-tab nav-tab-active" data-tab="ftp"><?php esc_html_e( 'FTP', 'beestore-integration' ); ?></a>
                         <a href="#bsi-soap" class="nav-tab" data-tab="soap"><?php esc_html_e( 'SOAP / BeeStore', 'beestore-integration' ); ?></a>
                         <a href="#bsi-sync" class="nav-tab" data-tab="sync"><?php esc_html_e( 'Синхронизация', 'beestore-integration' ); ?></a>
+                        <a href="#bsi-images" class="nav-tab" data-tab="images"><?php esc_html_e( 'Картинки', 'beestore-integration' ); ?></a>
                         <a href="#bsi-payments" class="nav-tab" data-tab="payments"><?php esc_html_e( 'Платежи', 'beestore-integration' ); ?></a>
                         <a href="#bsi-pricing" class="nav-tab" data-tab="pricing"><?php esc_html_e( 'Конвертация цен', 'beestore-integration' ); ?></a>
                 </h2>
@@ -126,6 +127,133 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                                                 </select>
                                                         </label>
                                                 <?php endif; ?>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><label for="ftp_port"><?php esc_html_e( 'Порт', 'beestore-integration' ); ?></label></th>
+                                        <td>
+                                                <input type="number" name="bsi_settings[ftp_port]" id="ftp_port" value="<?php echo esc_attr( $ftp_port ); ?>" class="small-text">
+                                                <p class="description"><?php esc_html_e( 'FTP по умолчанию — 21, SFTP — 22.', 'beestore-integration' ); ?></p>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><label for="ftp_user"><?php esc_html_e( 'Пользователь', 'beestore-integration' ); ?></label></th>
+                                        <td><input type="text" name="bsi_settings[ftp_user]" id="ftp_user" value="<?php echo esc_attr( $ftp_user ); ?>" class="regular-text"></td>
+                                </tr>
+                                <tr>
+                                        <th><label for="ftp_pass"><?php esc_html_e( 'Пароль', 'beestore-integration' ); ?></label></th>
+                                        <td><input type="password" name="bsi_settings[ftp_pass]" id="ftp_pass" value="<?php echo esc_attr( $ftp_pass ); ?>" class="regular-text"></td>
+                                </tr>
+                                <tr>
+                                        <th><label for="ftp_path"><?php esc_html_e( 'Каталог на FTP', 'beestore-integration' ); ?></label></th>
+                                        <td>
+                                                <input type="text" name="bsi_settings[ftp_path]" id="ftp_path" value="<?php echo esc_attr( $ftp_path ); ?>" class="regular-text" placeholder="/">
+                                                <p class="description"><?php esc_html_e( 'Путь к каталогу, куда BeeStore выкладывает ZIP-файлы COMPANY_*.zip.', 'beestore-integration' ); ?></p>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><?php esc_html_e( 'Использовать SFTP', 'beestore-integration' ); ?></th>
+                                        <td>
+                                                <label>
+                                                        <input type="checkbox" name="bsi_settings[ftp_use_sftp]" value="1" <?php checked( $ftp_use_sftp ); ?>>
+                                                        <?php esc_html_e( 'Включить SFTP (требуется расширение PHP ssh2)', 'beestore-integration' ); ?>
+                                                </label>
+                                        </td>
+                                </tr>
+                        </table>
+                </div>
+
+                <!-- SOAP -->
+                <div id="bsi-soap" class="bsi-tab" style="display:none;">
+                        <table class="form-table" role="presentation">
+                                <tr>
+                                        <th><label for="wsdl_url"><?php esc_html_e( 'WSDL URL', 'beestore-integration' ); ?></label></th>
+                                        <td>
+                                                <input type="url" name="bsi_settings[wsdl_url]" id="wsdl_url" value="<?php echo esc_attr( $wsdl_url ); ?>" class="large-text" placeholder="http://www.sirio-is.it:8180/.../soapBeestore.wsdl">
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><label for="soap_user"><?php esc_html_e( 'Пользователь SOAP', 'beestore-integration' ); ?></label></th>
+                                        <td><input type="text" name="bsi_settings[soap_user]" id="soap_user" value="<?php echo esc_attr( $soap_user ); ?>" class="regular-text"></td>
+                                </tr>
+                                <tr>
+                                        <th><label for="soap_pass"><?php esc_html_e( 'Пароль SOAP', 'beestore-integration' ); ?></label></th>
+                                        <td><input type="password" name="bsi_settings[soap_pass]" id="soap_pass" value="<?php echo esc_attr( $soap_pass ); ?>" class="regular-text"></td>
+                                </tr>
+                                <tr>
+                                        <th><label for="igu_negozio"><?php esc_html_e( 'IGU Negozio (магазин)', 'beestore-integration' ); ?></label></th>
+                                        <td>
+                                                <input type="text" name="bsi_settings[igu_negozio]" id="igu_negozio" value="<?php echo esc_attr( $igu_negozio ); ?>" class="regular-text">
+                                                <p class="description"><?php esc_html_e( 'В вашей выгрузке: 540 (магазин BAY).', 'beestore-integration' ); ?></p>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><label for="igu_cliente"><?php esc_html_e( 'IGU Cliente (клиент по умолчанию)', 'beestore-integration' ); ?></label></th>
+                                        <td>
+                                                <input type="text" name="bsi_settings[igu_cliente]" id="igu_cliente" value="<?php echo esc_attr( $igu_cliente ); ?>" class="regular-text" placeholder="13\51\39\1\419339\0">
+                                                <p class="description"><?php esc_html_e( 'Уникальный клиент-призрак, под которым оформляются все заказы маркетплейса в BeeStore. Код предоставляет Sirio.', 'beestore-integration' ); ?></p>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><label for="igu_valuta"><?php esc_html_e( 'IGU Valuta', 'beestore-integration' ); ?></label></th>
+                                        <td><input type="text" name="bsi_settings[igu_valuta]" id="igu_valuta" value="<?php echo esc_attr( $igu_valuta ); ?>" class="regular-text" placeholder="15\1\1\1"></td>
+                                </tr>
+                                <tr>
+                                        <th><label for="igu_magazzino_riga"><?php esc_html_e( 'IGU Magazzino Riga', 'beestore-integration' ); ?></label></th>
+                                        <td><input type="text" name="bsi_settings[igu_magazzino_riga]" id="igu_magazzino_riga" value="<?php echo esc_attr( $igu_magazzino_riga ); ?>" class="regular-text" placeholder="оставьте пустым"></td>
+                                </tr>
+                                <tr>
+                                        <th><label for="cod_iva_default"><?php esc_html_e( 'Cod IVA по умолчанию', 'beestore-integration' ); ?></label></th>
+                                        <td><input type="text" name="bsi_settings[cod_iva_default]" id="cod_iva_default" value="<?php echo esc_attr( $cod_iva_default ); ?>" class="small-text" placeholder="22"></td>
+                                </tr>
+                                <tr>
+                                        <th><label for="default_tax_rate"><?php esc_html_e( 'Ставка НДС, %', 'beestore-integration' ); ?></label></th>
+                                        <td><input type="number" step="0.01" name="bsi_settings[default_tax_rate]" id="default_tax_rate" value="<?php echo esc_attr( $default_tax_rate ); ?>" class="small-text"></td>
+                                </tr>
+                                <tr>
+                                        <th><label for="cod_dest_sdi"><?php esc_html_e( 'CodDestSDI', 'beestore-integration' ); ?></label></th>
+                                        <td><input type="text" name="bsi_settings[cod_dest_sdi]" id="cod_dest_sdi" value="<?php echo esc_attr( $cod_dest_sdi ); ?>" class="regular-text" maxlength="7"></td>
+                                </tr>
+                        </table>
+                </div>
+
+                <!-- Синхронизация -->
+                <div id="bsi-sync" class="bsi-tab" style="display:none;">
+                        <table class="form-table" role="presentation">
+                                <tr>
+                                        <th><?php esc_html_e( 'Передавать заказы в BeeStore', 'beestore-integration' ); ?></th>
+                                        <td>
+                                                <label>
+                                                        <input type="checkbox" name="bsi_settings[enable_order_sync]" value="1" <?php checked( $enable_order_sync ); ?>>
+                                                        <?php esc_html_e( 'Включить (fInserimentoPrenotazione при оплате)', 'beestore-integration' ); ?>
+                                                </label>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><?php esc_html_e( 'Получать статусы заказов', 'beestore-integration' ); ?></th>
+                                        <td>
+                                                <label>
+                                                        <input type="checkbox" name="bsi_settings[enable_status_sync]" value="1" <?php checked( $enable_status_sync ); ?>>
+                                                        <?php esc_html_e( 'Включить cron-опрос fStatoPrenotazioni', 'beestore-integration' ); ?>
+                                                </label>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><?php esc_html_e( 'Проверка остатков real-time', 'beestore-integration' ); ?></th>
+                                        <td>
+                                                <label>
+                                                        <input type="checkbox" name="bsi_settings[enable_realtime_stock]" value="1" <?php checked( $enable_realtime_stock ); ?>>
+                                                        <?php esc_html_e( 'Запрос fDisponibilita при оформлении заказа (замедляет checkout)', 'beestore-integration' ); ?>
+                                                </label>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><?php esc_html_e( 'Снимать с публикации отсутствующие товары', 'beestore-integration' ); ?></th>
+                                        <td>
+                                                <label>
+                                                        <input type="checkbox" name="bsi_settings[delete_out_of_stock]" value="1" <?php checked( $delete_out_of_stock ); ?>>
+                                                        <?php esc_html_e( 'Если товар не встретился в утренней выгрузке — скрывать', 'beestore-integration' ); ?>
+                                                </label>
                                         </td>
                                 </tr>
                                 <tr>
@@ -322,6 +450,12 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                 </tr>
                         </table>
                 </div>
+
+		<!-- Картинки -->
+		<div id="bsi-images" class="bsi-tab" style="display:none;">
+			<table class="form-table" role="presentation">
+			</table>
+		</div>
 
                 <!-- Платежи -->
                 <div id="bsi-payments" class="bsi-tab" style="display:none;">

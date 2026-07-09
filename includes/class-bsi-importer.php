@@ -1666,6 +1666,10 @@ class BSI_Importer {
         /**
          * Скачать картинку и привязать к товару (или использовать hotlink).
          *
+         * Переиспользование: ищет существующую картинку по basename без расширения.
+         * Например: URL "http://...2000019668213_1.jpg" → ищем "2000019668213_1"
+         * Если уже скачана (как .webp или .jpg) — переиспользуем, не качаем заново.
+         *
          * @param string $url
          * @param int    $product_id
          * @param bool   $download Скачивать в Media или использовать URL напрямую.
@@ -1676,14 +1680,25 @@ class BSI_Importer {
                         return false;
                 }
 
-                // Проверяем — не привязывали ли уже.
+                // Извлекаем basename без расширения для поиска.
+                $basename = basename( parse_url( $url, PHP_URL_PATH ) );
+                $filename_without_ext = pathinfo( $basename, PATHINFO_FILENAME );
+
+                // 1. Сначала ищем по meta _bsi_image_url (точное совпадение URL).
                 $existing = $this->find_attachment_by_meta( '_bsi_image_url', $url );
                 if ( $existing ) {
                         return $existing;
                 }
 
+                // 2. Ищем по _bsi_image_basename (без расширения) — переиспользование.
+                $existing_by_name = $this->find_attachment_by_basename( $filename_without_ext );
+                if ( $existing_by_name ) {
+                        // Сохраняем URL в meta для будущего точного поиска.
+                        update_post_meta( $existing_by_name, '_bsi_image_url', $url );
+                        return $existing_by_name;
+                }
+
                 if ( ! $download ) {
-                        // Hotlink: просто записываем URL в meta (плагин должен уметь отображать).
                         return 0;
                 }
 
@@ -1694,7 +1709,9 @@ class BSI_Importer {
                         return false;
                 }
 
+                // Сохраняем meta.
                 update_post_meta( $attach_id, '_bsi_image_url', $url );
+                update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
 
                 // Конвертация в WebP (если включена).
                 $settings = get_option( 'bsi_settings', array() );
@@ -1705,6 +1722,27 @@ class BSI_Importer {
                 }
 
                 return $attach_id;
+        }
+
+        /**
+         * Найти attachment по basename (без расширения).
+         * Ищет в _bsi_image_basename meta.
+         *
+         * @param string $basename Filename без расширения (например "2000019668213_1")
+         * @return int|false
+         */
+        private function find_attachment_by_basename( $basename ) {
+                if ( empty( $basename ) ) {
+                        return false;
+                }
+                global $wpdb;
+                $found = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT post_id FROM {$wpdb->postmeta}
+                         WHERE meta_key = '_bsi_image_basename' AND meta_value = %s
+                         LIMIT 1",
+                        $basename
+                ) );
+                return $found ? (int) $found : false;
         }
 
         /**

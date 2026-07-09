@@ -104,31 +104,6 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                                 <input type="text" name="bsi_settings[ftp_host]" id="ftp_host" value="<?php echo esc_attr( $ftp_host ); ?>" class="regular-text" placeholder="ftp.example.com">
                                         </td>
                                 </tr>
-
-                                <tr>
-                                        <th>Конвертировать в WebP</th>
-                                        <td>
-                                                <label>
-                                                        <input type="checkbox" name="bsi_settings[webp_enabled]" value="1" <?php checked( $webp_enabled ); ?>>
-                                                        При скачивании конвертировать в WebP и удалить оригинал
-                                                </label>
-                                                <p class="description">WebP сжимает картинки на 30-50% без потери качества.</p>
-                                                <?php if ( ! $webp_supports ) : ?>
-                                                        <p style="color:#c62828;font-weight:600;">⚠ Сервер не поддерживает WebP!</p>
-                                                <?php else : ?>
-                                                        <label style="display:block;margin-top:8px;">
-                                                                Стратегия:
-                                                                <select name="bsi_settings[webp_strategy]">
-                                                                        <option value="3" <?php selected( $webp_strategy, 3 ); ?>>3 — Сбалансированно (рекомендуется)</option>
-                                                                        <option value="1" <?php selected( $webp_strategy, 1 ); ?>>1 — Макс. компрессия</option>
-                                                                        <option value="2" <?php selected( $webp_strategy, 2 ); ?>>2 — Высокая компрессия</option>
-                                                                        <option value="4" <?php selected( $webp_strategy, 4 ); ?>>4 — Высокое качество</option>
-                                                                        <option value="5" <?php selected( $webp_strategy, 5 ); ?>>5 — Lossless</option>
-                                                                </select>
-                                                        </label>
-                                                <?php endif; ?>
-                                        </td>
-                                </tr>
                                 <tr>
                                         <th><label for="ftp_port"><?php esc_html_e( 'Порт', 'beestore-integration' ); ?></label></th>
                                         <td>
@@ -380,15 +355,6 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                                 <label>
                                                         <input type="checkbox" name="bsi_settings[delete_out_of_stock]" value="1" <?php checked( $delete_out_of_stock ); ?>>
                                                         <?php esc_html_e( 'Если товар не встретился в утренней выгрузке — скрывать', 'beestore-integration' ); ?>
-                                                </label>
-                                        </td>
-                                </tr>
-                                <tr>
-                                        <th><?php esc_html_e( 'Скачивать картинки', 'beestore-integration' ); ?></th>
-                                        <td>
-                                                <label>
-                                                        <input type="checkbox" name="bsi_settings[download_images]" value="1" <?php checked( $download_images ); ?>>
-                                                        <?php esc_html_e( 'Загружать URLImg1..10 в Media Library', 'beestore-integration' ); ?>
                                                 </label>
                                         </td>
                                 </tr>
@@ -451,11 +417,59 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                         </table>
                 </div>
 
-		<!-- Картинки -->
-		<div id="bsi-images" class="bsi-tab" style="display:none;">
-			<table class="form-table" role="presentation">
-			</table>
-		</div>
+                <!-- Картинки -->
+                <div id="bsi-images" class="bsi-tab" style="display:none;">
+                        <table class="form-table" role="presentation">
+                                <tr>
+                                        <th><?php esc_html_e( 'Скачивать картинки', 'beestore-integration' ); ?></th>
+                                        <td>
+                                                <label>
+                                                        <input type="checkbox" name="bsi_settings[download_images]" value="1" <?php checked( $download_images ); ?>>
+                                                        <?php esc_html_e( 'Загружать URLImg1..10 в Media Library', 'beestore-integration' ); ?>
+                                                </label>
+                                                <p class="description">
+                                                        <?php esc_html_e( 'Если выключено — URL картинок сохраняются в meta, но не скачиваются. Можно докачать позже кнопкой «Докачать картинки» на странице импорта.', 'beestore-integration' ); ?>
+                                                </p>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><?php esc_html_e( 'Конвертировать в WebP', 'beestore-integration' ); ?></th>
+                                        <td>
+                                                <label>
+                                                        <input type="checkbox" name="bsi_settings[webp_enabled]" value="1" <?php checked( $webp_enabled ); ?>>
+                                                        <?php esc_html_e( 'При скачивании конвертировать в WebP и удалить оригинал', 'beestore-integration' ); ?>
+                                                </label>
+                                                <p class="description">
+                                                        <?php esc_html_e( 'WebP сжимает картинки на 30-50% без потери качества. Экономит место на сервере и ускоряет загрузку сайта.', 'beestore-integration' ); ?>
+                                                </p>
+                                                <?php if ( ! $webp_supports ) : ?>
+                                                        <p style="color:#c62828;font-weight:600;">
+                                                                ⚠ <?php esc_html_e( 'Сервер не поддерживает WebP! Нужно установить PHP-расширение Imagick или GD с поддержкой WebP. Обратитесь к хостинг-провайдеру.', 'beestore-integration' ); ?>
+                                                        </p>
+                                                <?php else : ?>
+                                                        <label style="display:block;margin-top:10px;">
+                                                                <?php esc_html_e( 'Стратегия сжатия:', 'beestore-integration' ); ?>
+                                                                <select name="bsi_settings[webp_strategy]">
+                                                                        <option value="1" <?php selected( $webp_strategy, 1 ); ?>><?php esc_html_e( '1 — Максимальная компрессия (минимальный размер)', 'beestore-integration' ); ?></option>
+                                                                        <option value="2" <?php selected( $webp_strategy, 2 ); ?>><?php esc_html_e( '2 — Высокая компрессия', 'beestore-integration' ); ?></option>
+                                                                        <option value="3" <?php selected( $webp_strategy, 3 ); ?>><?php esc_html_e( '3 — Сбалансированно (рекомендуется)', 'beestore-integration' ); ?></option>
+                                                                        <option value="4" <?php selected( $webp_strategy, 4 ); ?>><?php esc_html_e( '4 — Высокое качество', 'beestore-integration' ); ?></option>
+                                                                        <option value="5" <?php selected( $webp_strategy, 5 ); ?>><?php esc_html_e( '5 — Lossless (без потерь)', 'beestore-integration' ); ?></option>
+                                                                </select>
+                                                        </label>
+                                                <?php endif; ?>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><?php esc_html_e( 'Переиспользование картинок', 'beestore-integration' ); ?></th>
+                                        <td>
+                                                <p class="description">
+                                                        ✓ <?php esc_html_e( 'Плагин автоматически переиспользует картинки по имени файла (без расширения). Если картинка уже скачана (как .jpg или .webp), она не будет скачана заново при повторном импорте.', 'beestore-integration' ); ?>
+                                                </p>
+                                        </td>
+                                </tr>
+                        </table>
+                </div>
 
                 <!-- Платежи -->
                 <div id="bsi-payments" class="bsi-tab" style="display:none;">

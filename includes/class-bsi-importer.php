@@ -1139,9 +1139,31 @@ class BSI_Importer {
                         }
                 }
 
-                // Сбрасываем кэш товара.
+                // КРИТИЧЕСКИ ВАЖНО: повторно сохраняем родителя ПОСЛЕ создания всех
+                // вариаций. Без этого WooCommerce не связывает атрибуты родителя с
+                // вариациями — на странице товара select пустой.
+                $product_obj = wc_get_product( $product_id );
+                if ( $product_obj && $product_obj instanceof WC_Product_Variable ) {
+                        // Перечитываем атрибуты и сохраняем заново.
+                        $attributes = $product_obj->get_attributes();
+                        $product_obj->set_attributes( $attributes );
+                        $product_obj->save();
+
+                        // Финальная синхронизация после повторного сохранения.
+                        WC_Product_Variable::sync( $product_id );
+                        WC_Product_Variable::sync_stock_status( $product_id );
+                }
+
+                // Сбрасываем ВСЕ кэши.
                 wc_delete_product_transients( $product_id );
                 clean_post_cache( $product_id );
+
+                // Удаляем специфичные transient'ы вариативного товара.
+                delete_transient( 'wc_var_prices_' . $product_id );
+                delete_transient( 'wc_product_children_' . $product_id );
+                delete_transient( 'wc_product_total_stock_' . $product_id );
+                wp_cache_delete( $product_id, 'product_variation_attributes' );
+                wp_cache_delete( $product_id, 'products' );
 
                 return $product_id;
         }

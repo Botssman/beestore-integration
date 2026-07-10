@@ -1186,11 +1186,15 @@ class BSI_Importer {
          * @param string $label Название (например 'Color', 'Size')
          */
         private function ensure_wc_attribute( $slug, $label ) {
-                // 1. Проверяем существование в таблице wc_attribute_taxonomies.
-                $attr = function_exists( 'wc_get_attribute' ) ? wc_get_attribute( $slug ) : null;
+                // 1. Проверяем напрямую в БД — минуя кэш.
+                global $wpdb;
+                $exists = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT attribute_id FROM {$wpdb->prefix}woocommerce_attribute_taxonomies WHERE attribute_name = %s LIMIT 1",
+                        $slug
+                ) );
 
-                if ( ! $attr ) {
-                        // Атрибута нет в таблице — создаём.
+                if ( ! $exists ) {
+                        // Атрибута нет в таблице — создаём через WooCommerce API.
                         if ( function_exists( 'wc_create_attribute' ) ) {
                                 $result = wc_create_attribute( array(
                                         'name'         => $label,
@@ -1201,27 +1205,37 @@ class BSI_Importer {
                                 ) );
 
                                 if ( is_wp_error( $result ) ) {
-                                        $this->log( 'error', 'Не удалось создать атрибут WooCommerce', array(
-                                                'slug'  => $slug,
-                                                'error' => $result->get_error_message(),
-                                        ) );
-                                        return;
+                                        // Если wc_create_attribute не сработал — вставляем напрямую в БД.
+                                        $wpdb->insert(
+                                                $wpdb->prefix . 'woocommerce_attribute_taxonomies',
+                                                array(
+                                                        'attribute_label'    => $label,
+                                                        'attribute_name'     => $slug,
+                                                        'attribute_type'      => 'select',
+                                                        'attribute_orderby'   => 'menu_order',
+                                                        'attribute_public'    => 0,
+                                                )
+                                        );
+                                        $this->log( 'info', 'Атрибут создан напрямую в БД', array( 'slug' => $slug ) );
                                 }
                         }
 
-                        // Сбрасываем кэш атрибутов.
+                        // Сбрасываем ВСЕ кэши WooCommerce.
                         delete_transient( 'wc_attribute_taxonomies' );
+                        if ( isset( $GLOBALS['wc_attribute_taxonomies'] ) ) {
+                                $GLOBALS['wc_attribute_taxonomies'] = null;
+                        }
                 }
 
-                // 2. Регистрируем таксономию в текущем запросе (критично для AJAX!).
+                // 2. Регистрируем таксономию в текущем запросе.
                 $taxonomy = 'pa_' . $slug;
                 if ( ! taxonomy_exists( $taxonomy ) ) {
-                        // Вызываем WooCommerce функцию регистрации всех таксономий атрибутов.
+                        // Вызываем WooCommerce функцию регистрации.
                         if ( function_exists( 'wc_register_attribute_taxonomies' ) ) {
                                 wc_register_attribute_taxonomies();
                         }
 
-                        // Если всё ещё не зарегистрирована — регистрируем вручную.
+                        // Если всё ещё не зарегистрирована — вручную.
                         if ( ! taxonomy_exists( $taxonomy ) ) {
                                 register_taxonomy( $taxonomy, array( 'product' ), array(
                                         'labels'       => array( 'name' => $label ),
@@ -1233,29 +1247,32 @@ class BSI_Importer {
                                 register_taxonomy_for_object_type( $taxonomy, 'product' );
                         }
                 }
+
+                // 3. Проверяем что ID действительно получен.
+                $attr_id = $this->get_attribute_id( 'pa_' . $slug );
+                if ( ! $attr_id ) {
+                        $this->log( 'error', 'Атрибут не найден после создания', array( 'slug' => $slug ) );
+                }
         }
 
         /**
          * Получить ID глобального атрибута по slug.
+         * Запрашивает НАПРЯМУЮ из БД — минуя кэш WooCommerce.
          *
-         * @param string $slug Slug атрибута (например 'colore' или 'pa_color').
+         * @param string $slug Slug атрибута (например 'pa_color' или 'color').
          * @return int
          */
         private function get_attribute_id( $slug ) {
-                // Нормализуем slug — убираем префикс 'pa_'.
                 $slug = str_replace( 'pa_', '', $slug );
 
-                $taxonomy = function_exists( 'wc_attribute_taxonomy_name' ) ? wc_attribute_taxonomy_name( $slug ) : 'pa_' . $slug;
-                $attr_id  = 0;
+                // Прямой запрос в БД — минуя ВСЕ кэши.
+                global $wpdb;
+                $attr_id = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT attribute_id FROM {$wpdb->prefix}woocommerce_attribute_taxonomies WHERE attribute_name = %s LIMIT 1",
+                        $slug
+                ) );
 
-                if ( function_exists( 'wc_get_attribute' ) ) {
-                        $attr = wc_get_attribute( $slug );
-                        if ( $attr && isset( $attr->attribute_id ) ) {
-                                $attr_id = (int) $attr->attribute_id;
-                        }
-                }
-
-                return $attr_id;
+                return $attr_id ? (int) $attr_id : 0;
         }
 
         /**

@@ -1333,8 +1333,8 @@ class BSI_Importer {
          * @param string $name    Название цвета (например 'EMERALDGOLD')
          */
         private function maybe_set_color_hex( $term_id, $name ) {
-                // Проверяем — не задан ли уже HEX.
-                $existing_hex = get_term_meta( $term_id, 'field_6a1259b521ec0', true );
+                // Проверяем — не задан ли уже HEX (по имени поля ACF 'cvet').
+                $existing_hex = get_term_meta( $term_id, 'cvet', true );
                 if ( $existing_hex ) {
                         return; // Уже задан — не перезаписываем.
                 }
@@ -1345,10 +1345,10 @@ class BSI_Importer {
                         return; // Не удалось определить — оставляем пустым.
                 }
 
-                // Сохраняем в ACF поле (term meta).
-                update_term_meta( $term_id, 'field_6a1259b521ec0', $hex );
-                // ACF reference — нужно для корректного отображения в админке.
-                update_term_meta( $term_id, '_field_6a1259b521ec0', 'field_6a1259b521ec0' );
+                // Сохраняем в ACF поле по ИМЕНИ поля ('cvet'), а не по ключу.
+                update_term_meta( $term_id, 'cvet', $hex );
+                // ACF reference — ключ поля для корректного отображения в админке.
+                update_term_meta( $term_id, '_cvet', 'field_6a1259b521ec0' );
 
                 $this->log( 'info', 'HEX-код цвета определён автоматически', array(
                         'color' => $name,

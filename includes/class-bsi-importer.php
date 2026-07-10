@@ -1047,26 +1047,13 @@ class BSI_Importer {
 
                 $attributes = array();
 
-                // ВАЖНО: регистрируем таксономии pa_color и pa_size в текущем запросе.
-                // WooCommerce регистрирует их только на хуке init, но AJAX-запрос
-                // может пропустить это. Без register_taxonomy() → is_taxonomy()=false
-                // → атрибуты сохраняются как кастомные → пустой <select>.
-                foreach ( array( 'pa_color', 'pa_size' ) as $tax_name ) {
-                        if ( ! taxonomy_exists( $tax_name ) ) {
-                                // Сначала убедимся что атрибут есть в таблице wc_attribute_taxonomies.
-                                BSI_Installer::register_attributes();
-                                // Затем регистрируем таксономию в текущем запросе.
-                                $label = ( 'pa_color' === $tax_name ) ? 'Color' : 'Size';
-                                register_taxonomy( $tax_name, array( 'product' ), array(
-                                        'labels'       => array( 'name' => $label ),
-                                        'hierarchical' => true,
-                                        'show_ui'      => false,
-                                        'query_var'    => true,
-                                        'rewrite'      => false,
-                                ) );
-                                register_taxonomy_for_object_type( $tax_name, 'product' );
-                        }
-                }
+                // ВАЖНО: полностью регистрируем атрибуты WooCommerce.
+                // Без этого data-taxonomy="" → пустой <select> на странице товара.
+                $this->ensure_wc_attribute( 'color', __( 'Color', 'beestore-integration' ) );
+                $this->ensure_wc_attribute( 'size', __( 'Size', 'beestore-integration' ) );
+
+                $color_attr_id = $this->get_attribute_id( 'pa_color' );
+                $size_attr_id  = $this->get_attribute_id( 'pa_size' );
 
                 if ( ! empty( $colors ) ) {
                         // Создаём термы и собираем их TERM IDs (не slug'и!).
@@ -1080,7 +1067,7 @@ class BSI_Importer {
                         }
 
                         $attr_color = new WC_Product_Attribute();
-                        $attr_color->set_id( $this->get_attribute_id( 'pa_color' ) );
+                        $attr_color->set_id( $color_attr_id );
                         $attr_color->set_name( 'pa_color' );
                         $attr_color->set_options( $color_term_ids );
                         $attr_color->set_position( 1 );
@@ -1098,7 +1085,7 @@ class BSI_Importer {
                         }
 
                         $attr_size = new WC_Product_Attribute();
-                        $attr_size->set_id( $this->get_attribute_id( 'pa_size' ) );
+                        $attr_size->set_id( $size_attr_id );
                         $attr_size->set_name( 'pa_size' );
                         $attr_size->set_options( $size_term_ids );
                         $attr_size->set_position( 2 );
@@ -1187,6 +1174,65 @@ class BSI_Importer {
                 wp_cache_delete( $product_id, 'products' );
 
                 return $product_id;
+        }
+
+        /**
+         * Полностью инициализировать атрибут WooCommerce.
+         * 1. Создаёт запись в таблице wc_attribute_taxonomies (если нет)
+         * 2. Регистрирует таксономию в текущем запросе
+         * 3. Сбрасывает кэш WooCommerce
+         *
+         * @param string $slug  Slug атрибута без 'pa_' (например 'color', 'size')
+         * @param string $label Название (например 'Color', 'Size')
+         */
+        private function ensure_wc_attribute( $slug, $label ) {
+                // 1. Проверяем существование в таблице wc_attribute_taxonomies.
+                $attr = function_exists( 'wc_get_attribute' ) ? wc_get_attribute( $slug ) : null;
+
+                if ( ! $attr ) {
+                        // Атрибута нет в таблице — создаём.
+                        if ( function_exists( 'wc_create_attribute' ) ) {
+                                $result = wc_create_attribute( array(
+                                        'name'         => $label,
+                                        'slug'         => $slug,
+                                        'type'         => 'select',
+                                        'order_by'     => 'menu_order',
+                                        'has_archives' => false,
+                                ) );
+
+                                if ( is_wp_error( $result ) ) {
+                                        $this->log( 'error', 'Не удалось создать атрибут WooCommerce', array(
+                                                'slug'  => $slug,
+                                                'error' => $result->get_error_message(),
+                                        ) );
+                                        return;
+                                }
+                        }
+
+                        // Сбрасываем кэш атрибутов.
+                        delete_transient( 'wc_attribute_taxonomies' );
+                }
+
+                // 2. Регистрируем таксономию в текущем запросе (критично для AJAX!).
+                $taxonomy = 'pa_' . $slug;
+                if ( ! taxonomy_exists( $taxonomy ) ) {
+                        // Вызываем WooCommerce функцию регистрации всех таксономий атрибутов.
+                        if ( function_exists( 'wc_register_attribute_taxonomies' ) ) {
+                                wc_register_attribute_taxonomies();
+                        }
+
+                        // Если всё ещё не зарегистрирована — регистрируем вручную.
+                        if ( ! taxonomy_exists( $taxonomy ) ) {
+                                register_taxonomy( $taxonomy, array( 'product' ), array(
+                                        'labels'       => array( 'name' => $label ),
+                                        'hierarchical' => true,
+                                        'show_ui'      => false,
+                                        'query_var'    => true,
+                                        'rewrite'      => false,
+                                ) );
+                                register_taxonomy_for_object_type( $taxonomy, 'product' );
+                        }
+                }
         }
 
         /**

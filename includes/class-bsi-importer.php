@@ -1295,7 +1295,14 @@ class BSI_Importer {
 
                 $existing = term_exists( $name, $taxonomy );
                 if ( is_array( $existing ) && isset( $existing['term_id'] ) ) {
-                        return (int) $existing['term_id'];
+                        $term_id = (int) $existing['term_id'];
+
+                        // Для pa_color — обновляем HEX-код (если ещё не задан).
+                        if ( 'pa_color' === $taxonomy ) {
+                                $this->maybe_set_color_hex( $term_id, $name );
+                        }
+
+                        return $term_id;
                 }
 
                 $result = wp_insert_term( $name, $taxonomy );
@@ -1307,7 +1314,47 @@ class BSI_Importer {
                         ) );
                         return 0;
                 }
-                return (int) $result['term_id'];
+
+                $term_id = (int) $result['term_id'];
+
+                // Для pa_color — определяем HEX-код и сохраняем в ACF поле.
+                if ( 'pa_color' === $taxonomy ) {
+                        $this->maybe_set_color_hex( $term_id, $name );
+                }
+
+                return $term_id;
+        }
+
+        /**
+         * Определить HEX-код цвета по названию и сохранить в ACF поле.
+         * ACF field key: field_6a1259b521ec0 (color picker на таксономии pa_color)
+         *
+         * @param int    $term_id ID терма цвета
+         * @param string $name    Название цвета (например 'EMERALDGOLD')
+         */
+        private function maybe_set_color_hex( $term_id, $name ) {
+                // Проверяем — не задан ли уже HEX.
+                $existing_hex = get_term_meta( $term_id, 'field_6a1259b521ec0', true );
+                if ( $existing_hex ) {
+                        return; // Уже задан — не перезаписываем.
+                }
+
+                // Определяем HEX по названию.
+                $hex = BSI_Color_Matcher::match( $name );
+                if ( ! $hex ) {
+                        return; // Не удалось определить — оставляем пустым.
+                }
+
+                // Сохраняем в ACF поле (term meta).
+                update_term_meta( $term_id, 'field_6a1259b521ec0', $hex );
+                // ACF reference — нужно для корректного отображения в админке.
+                update_term_meta( $term_id, '_field_6a1259b521ec0', 'field_6a1259b521ec0' );
+
+                $this->log( 'info', 'HEX-код цвета определён автоматически', array(
+                        'color' => $name,
+                        'hex'   => $hex,
+                        'term'  => $term_id,
+                ) );
         }
 
         /**

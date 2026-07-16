@@ -31,9 +31,10 @@ $current_rate_info = class_exists( 'BSI_Currency' ) ? BSI_Currency::instance()->
 
 $source_names = array(
         'manual'        => __( 'Ручной ввод', 'beestore-integration' ),
-        'cbrf'          => __( 'ЦБ РФ', 'beestore-integration' ),
+        'cbrf'          => __( 'ЦБ РФ (только для RUB)', 'beestore-integration' ),
+        'nbk'           => __( 'НБ Казахстана (для KZT)', 'beestore-integration' ),
         'ecb'           => __( 'Европейский ЦБ (ECB)', 'beestore-integration' ),
-        'er_api'        => __( 'open.er-api.com', 'beestore-integration' ),
+        'er_api'        => __( 'open.er-api.com (универсальный)', 'beestore-integration' ),
         'same_currency' => __( 'Валюты совпадают', 'beestore-integration' ),
 );
 $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source_names[ $current_rate_info['source'] ] : $current_rate_info['source'];
@@ -41,7 +42,28 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
 // Следующее авто-обновление (когда сработает cron).
 $next_refresh = wp_next_scheduled( 'bsi_cron_refresh_rate' );
 
-$currencies = array( 'EUR', 'USD', 'GBP', 'RUB', 'CHF', 'JPY', 'CNY' );
+$currencies = array( 'EUR', 'USD', 'GBP', 'RUB', 'KZT', 'UAH', 'BYN', 'TRY', 'AMD', 'GEL', 'CHF', 'JPY', 'CNY' );
+
+// Текущая валюта WooCommerce (для предупреждения о несовпадении).
+$wc_currency = function_exists( 'get_woocommerce_currency' ) ? get_woocommerce_currency() : '';
+$currency_mismatch = $wc_currency && $wc_currency !== $shop_currency;
+
+// Человекопонятные названия валют.
+$currency_labels = array(
+        'EUR' => __( 'EUR — Евро', 'beestore-integration' ),
+        'USD' => __( 'USD — Доллар США', 'beestore-integration' ),
+        'GBP' => __( 'GBP — Фунт стерлингов', 'beestore-integration' ),
+        'RUB' => __( 'RUB — Российский рубль', 'beestore-integration' ),
+        'KZT' => __( 'KZT — Казахстанский тенге', 'beestore-integration' ),
+        'UAH' => __( 'UAH — Украинская гривна', 'beestore-integration' ),
+        'BYN' => __( 'BYN — Белорусский рубль', 'beestore-integration' ),
+        'TRY' => __( 'TRY — Турецкая лира', 'beestore-integration' ),
+        'AMD' => __( 'AMD — Армянский драм', 'beestore-integration' ),
+        'GEL' => __( 'GEL — Грузинский лари', 'beestore-integration' ),
+        'CHF' => __( 'CHF — Швейцарский франк', 'beestore-integration' ),
+        'JPY' => __( 'JPY — Японская иена', 'beestore-integration' ),
+        'CNY' => __( 'CNY — Китайский юань', 'beestore-integration' ),
+);
 
 // Пример расчёта.
 $example_supplier = 100;
@@ -64,6 +86,34 @@ if ( $round_prices ) {
                         <code><?php esc_html_e( 'цена_магазина = цена_BeeStore × курс_валюты × коэффициент_надбавки + фиксированная_надбавка', 'beestore-integration' ); ?></code>
                 </p>
         </div>
+
+        <?php if ( $currency_mismatch ) : ?>
+                <div class="notice notice-warning" style="border-left-color:#ffb900;">
+                        <p>
+                                <strong><?php esc_html_e( 'Внимание: валюта плагина не совпадает с валютой WooCommerce.', 'beestore-integration' ); ?></strong>
+                        </p>
+                        <p style="margin:8px 0;">
+                                <?php
+                                echo wp_kses_post( sprintf(
+                                        /* translators: 1: WC currency, 2: plugin target currency */
+                                        __( 'WooCommerce сейчас показывает цены в <strong>%1$s</strong>, а плагин конвертирует BeeStore-цены в <strong>%2$s</strong>.', 'beestore-integration' ),
+                                        esc_html( $wc_currency ),
+                                        esc_html( $shop_currency )
+                                ) );
+                                ?>
+                        </p>
+                        <p style="margin:8px 0;">
+                                <?php
+                                echo wp_kses_post( __( '<strong>Что это значит:</strong> числовые значения цен будут правильными (как рассчитано плагином), но WooCommerce добавит к ним символ/код своей валюты — то есть цены будут показаны как «12 450 ₸» вместо «12 450 ₽».', 'beestore-integration' ) );
+                                ?>
+                        </p>
+                        <p style="margin:8px 0;">
+                                <?php
+                                echo wp_kses_post( __( '<strong>Как исправить отображение:</strong> переключите WooCommerce обратно в нужную валюту — <em>WooCommerce → Настройки → Основные → Валюта</em>. Плагин продолжит конвертировать в то, что выбрано в поле «Валюта магазина» ниже, независимо от настройки WooCommerce.', 'beestore-integration' ) );
+                                ?>
+                        </p>
+                </div>
+        <?php endif; ?>
 
         <!-- Текущий курс — крупная карточка -->
         <div class="bsi-card" style="background:#fff;border:1px solid #e0e0e0;border-left:4px solid #2271b1;padding:20px 24px;margin:15px 0 25px;">
@@ -109,21 +159,37 @@ if ( $round_prices ) {
                                         <td>
                                                 <select name="supplier_currency" id="supplier_currency">
                                                         <?php foreach ( $currencies as $cur ) : ?>
-                                                                <option value="<?php echo esc_attr( $cur ); ?>" <?php selected( $supplier_currency, $cur ); ?>><?php echo esc_html( $cur ); ?></option>
+                                                                <option value="<?php echo esc_attr( $cur ); ?>" <?php selected( $supplier_currency, $cur ); ?>>
+                                                                        <?php echo esc_html( isset( $currency_labels[ $cur ] ) ? $currency_labels[ $cur ] : $cur ); ?>
+                                                                </option>
                                                         <?php endforeach; ?>
                                                 </select>
                                                 <p class="description"><?php esc_html_e( 'Валюта, в которой BeeStore присылает цены (PrezzoIvato). Обычно EUR.', 'beestore-integration' ); ?></p>
                                         </td>
                                 </tr>
                                 <tr>
-                                        <th><label for="shop_currency"><?php esc_html_e( 'Валюта магазина (WooCommerce)', 'beestore-integration' ); ?></label></th>
+                                        <th><label for="shop_currency"><?php esc_html_e( 'Конвертировать в валюту', 'beestore-integration' ); ?></label></th>
                                         <td>
                                                 <select name="shop_currency" id="shop_currency">
                                                         <?php foreach ( $currencies as $cur ) : ?>
-                                                                <option value="<?php echo esc_attr( $cur ); ?>" <?php selected( $shop_currency, $cur ); ?>><?php echo esc_html( $cur ); ?></option>
+                                                                <option value="<?php echo esc_attr( $cur ); ?>" <?php selected( $shop_currency, $cur ); ?>>
+                                                                        <?php echo esc_html( isset( $currency_labels[ $cur ] ) ? $currency_labels[ $cur ] : $cur ); ?>
+                                                                </option>
                                                         <?php endforeach; ?>
                                                 </select>
-                                                <p class="description"><?php esc_html_e( 'Валюта вашего магазина. Должна совпадать с настройкой WooCommerce.', 'beestore-integration' ); ?></p>
+                                                <p class="description">
+                                                        <?php esc_html_e( 'Валюта, в которую плагин конвертирует цены при импорте. Это независимая настройка — она не зависит от того, какая валюта сейчас выбрана в WooCommerce.', 'beestore-integration' ); ?>
+                                                        <?php if ( $wc_currency ) : ?>
+                                                                <br>
+                                                                <?php
+                                                                echo wp_kses_post( sprintf(
+                                                                        /* translators: 1: WC currency code */
+                                                                        __( '<em>Сейчас в WooCommerce выбрано: %1$s.</em>', 'beestore-integration' ),
+                                                                        '<strong>' . esc_html( $wc_currency ) . '</strong>'
+                                                                ) );
+                                                                ?>
+                                                        <?php endif; ?>
+                                                </p>
                                         </td>
                                 </tr>
                                 <tr>
@@ -162,16 +228,19 @@ if ( $round_prices ) {
                                         <td>
                                                 <select name="currency_rate_auto_source" id="currency_rate_auto_source">
                                                         <option value="auto" <?php selected( $currency_rate_auto_source, 'auto' ); ?>>
-                                                                <?php esc_html_e( 'Авто (рекомендуется) — лучший источник по валюте', 'beestore-integration' ); ?>
+                                                                <?php esc_html_e( 'Авто (рекомендуется) — лучший источник по целевой валюте', 'beestore-integration' ); ?>
                                                         </option>
                                                         <option value="cbrf" <?php selected( $currency_rate_auto_source, 'cbrf' ); ?>>
                                                                 <?php esc_html_e( 'ЦБ РФ (только для RUB)', 'beestore-integration' ); ?>
+                                                        </option>
+                                                        <option value="nbk" <?php selected( $currency_rate_auto_source, 'nbk' ); ?>>
+                                                                <?php esc_html_e( 'НБ Казахстана (для KZT)', 'beestore-integration' ); ?>
                                                         </option>
                                                         <option value="ecb" <?php selected( $currency_rate_auto_source, 'ecb' ); ?>>
                                                                 <?php esc_html_e( 'Европейский ЦБ (ECB)', 'beestore-integration' ); ?>
                                                         </option>
                                                         <option value="er_api" <?php selected( $currency_rate_auto_source, 'er_api' ); ?>>
-                                                                <?php esc_html_e( 'open.er-api.com (универсальный)', 'beestore-integration' ); ?>
+                                                                <?php esc_html_e( 'open.er-api.com (универсальный fallback)', 'beestore-integration' ); ?>
                                                         </option>
                                                 </select>
                                                 <p class="description">

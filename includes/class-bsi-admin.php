@@ -151,10 +151,40 @@ class BSI_Admin {
                         $settings['currency_rate_mode'] = isset( $_POST['currency_rate_mode'] ) ? sanitize_text_field( wp_unslash( $_POST['currency_rate_mode'] ) ) : 'manual';
                         $settings['currency_rate_auto_source'] = isset( $_POST['currency_rate_auto_source'] ) ? sanitize_text_field( wp_unslash( $_POST['currency_rate_auto_source'] ) ) : 'auto';
 
-                        $rate   = isset( $_POST['currency_rate'] ) ? floatval( wp_unslash( $_POST['currency_rate'] ) ) : 1;
+                        // ВАЖНО: в авто-режиме поле ввода курса скрыто, и из формы оно
+                        // приходит пустым. Если в этом случае перезаписать currency_rate
+                        // из POST — мы обнулим курс, который только что обновили AJAX-ом.
+                        // Поэтому: в авто-режиме сохраняем курс из текущих настроек (не трогаем).
+                        $new_mode = $settings['currency_rate_mode'];
+                        $old_mode = isset( $settings['currency_rate_mode'] ) ? $settings['currency_rate_mode'] : 'manual';
+
+                        if ( 'auto' === $new_mode ) {
+                                // В авто-режиме: НЕ трогаем currency_rate, оставляем то,
+                                // что пришло из AJAX-обновления (или из cron).
+                                // Просто проверяем, что есть какое-то значение > 0.
+                                $current_rate = isset( $settings['currency_rate'] ) ? (float) $settings['currency_rate'] : 1;
+                                if ( $current_rate <= 0 ) {
+                                        $settings['currency_rate'] = 1;
+                                }
+                                // Если раньше был ручной режим, а теперь авто — и курс ещё
+                                // не обновлялся (равен 1 или пустой) — попробуем обновить сразу.
+                                if ( 'manual' === $old_mode && $current_rate <= 1 ) {
+                                        $refresh_result = BSI_Currency::instance()->refresh_auto_rate();
+                                        if ( ! is_wp_error( $refresh_result ) ) {
+                                                $settings['currency_rate'] = $refresh_result['rate'];
+                                        }
+                                }
+                        } else {
+                                // Ручной режим: берём курс из формы (как раньше).
+                                $rate = isset( $_POST['currency_rate'] ) ? floatval( wp_unslash( $_POST['currency_rate'] ) ) : 1;
+                                $settings['currency_rate'] = $rate > 0 ? $rate : 1;
+                                // Сбрасываем инфо об авто-обновлении — курс теперь ручной.
+                                $settings['currency_rate_last_source'] = 'manual';
+                                $settings['currency_rate_last_update'] = current_time( 'mysql' );
+                        }
+
                         $markup = isset( $_POST['markup_coefficient'] ) ? floatval( wp_unslash( $_POST['markup_coefficient'] ) ) : 1;
                         $fixed  = isset( $_POST['fixed_markup'] ) ? floatval( wp_unslash( $_POST['fixed_markup'] ) ) : 0;
-                        $settings['currency_rate']     = $rate > 0 ? $rate : 1;
                         $settings['markup_coefficient'] = $markup > 0 ? $markup : 1;
                         $settings['fixed_markup']       = $fixed;
                         $settings['round_prices']       = isset( $_POST['round_prices'] ) ? '1' : '0';

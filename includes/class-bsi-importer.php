@@ -58,6 +58,37 @@ class BSI_Importer {
                 // AJAX: батчевое сканирование CSV для фильтров.
                 add_action( 'wp_ajax_bsi_scan_start', array( $this, 'ajax_scan_start' ) );
                 add_action( 'wp_ajax_bsi_scan_step', array( $this, 'ajax_scan_step' ) );
+
+                // AJAX: пересчёт цен всех товаров по текущей формуле (для кнопки на странице Конвертации).
+                add_action( 'wp_ajax_bsi_recalculate_prices', array( $this, 'ajax_recalculate_prices' ) );
+        }
+
+        /**
+         * AJAX: пересчёт цен всех импортированных товаров.
+         * Принимает offset для пагинации, возвращает статистику и has_more.
+         */
+        public function ajax_recalculate_prices() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $offset = isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0;
+                $batch  = isset( $_POST['batch'] ) ? absint( $_POST['batch'] ) : 100;
+
+                // Ограничиваем батч — не больше 500 за раз (защита от timeout).
+                if ( $batch > 500 ) {
+                        $batch = 500;
+                }
+                if ( $batch < 10 ) {
+                        $batch = 10;
+                }
+
+                $result = $this->recalculate_all_prices( $offset, $batch );
+
+                BSI_Logger::instance()->info( 'pricing', 'Пересчёт цен: батч обработан', $result );
+
+                wp_send_json_success( $result );
         }
 
         /* ---------------------------------------------------------------------
@@ -1620,26 +1651,39 @@ class BSI_Importer {
                 $price_disc   = isset( $row['PrezzoScontatoIvato'] ) ? (float) $row['PrezzoScontatoIvato'] : 0;
                 $discount     = isset( $row['Sconto'] ) ? (float) $row['Sconto'] : 0;
 
-                // Применяем конвертацию цен (если включена).
-                // Формула: цена_поставщика × курс_валюты × коэффициент_надбавки + фиксированная_надбавка
-                $price_gross = $this->convert_price( $price_gross );
-                $price_disc  = $this->convert_price( $price_disc );
-
+                // Сохраняем ОРИГИНАЛЬНЫЕ цены BeeStore в мете — нужно для кнопки
+                // «Пересчитать цены» на странице Конвертации, чтобы не зависеть
+                // от повторного импорта при изменении курса/наценки.
                 if ( $price_gross > 0 ) {
-                        $product->set_regular_price( wc_format_decimal( $price_gross, 2 ) );
+                        $product->update_meta_data( '_bsi_original_price_gross', $price_gross );
+                }
+                if ( $price_disc > 0 ) {
+                        $product->update_meta_data( '_bsi_original_price_disc', $price_disc );
+                }
+                if ( $discount > 0 ) {
+                        $product->update_meta_data( '_bsi_original_discount', $discount );
                 }
 
-                if ( $price_disc > 0 && $price_disc < $price_gross ) {
-                        $product->set_sale_price( wc_format_decimal( $price_disc, 2 ) );
-                        $product->set_price( wc_format_decimal( $price_disc, 2 ) );
-                } elseif ( $discount > 0 && $price_gross > 0 ) {
+                // Применяем конвертацию цен (если включена).
+                // Формула: цена_поставщика × курс_валюты × коэффициент_надбавки + фиксированная_надбавка
+                $price_gross_converted = $this->convert_price( $price_gross );
+                $price_disc_converted  = $this->convert_price( $price_disc );
+
+                if ( $price_gross_converted > 0 ) {
+                        $product->set_regular_price( wc_format_decimal( $price_gross_converted, 2 ) );
+                }
+
+                if ( $price_disc_converted > 0 && $price_disc_converted < $price_gross_converted ) {
+                        $product->set_sale_price( wc_format_decimal( $price_disc_converted, 2 ) );
+                        $product->set_price( wc_format_decimal( $price_disc_converted, 2 ) );
+                } elseif ( $discount > 0 && $price_gross_converted > 0 ) {
                         // Если есть скидка в %, но нет PrezzoScontatoIvato — вычисляем.
-                        $sale = $price_gross * ( 1 - $discount / 100 );
+                        $sale = $price_gross_converted * ( 1 - $discount / 100 );
                         $product->set_sale_price( wc_format_decimal( $sale, 2 ) );
                         $product->set_price( wc_format_decimal( $sale, 2 ) );
                 } else {
                         $product->set_sale_price( '' );
-                        $product->set_price( wc_format_decimal( $price_gross, 2 ) );
+                        $product->set_price( wc_format_decimal( $price_gross_converted, 2 ) );
                 }
         }
 
@@ -2267,5 +2311,104 @@ class BSI_Importer {
                         'has_more'  => ( $offset + $processed ) < $total,
                         'errors'    => $errors,
                 ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * Пересчёт цен всех импортированных товаров по текущей формуле.
+         *
+         * Используется кнопкой на странице «Конвертация цен» — после изменения
+         * курса/наценки/фиксированной надбавки. Берёт оригинальные цены из
+         * меты _bsi_original_price_gross / _bsi_original_price_disc / _bsi_original_discount
+         * (заполняются при импорте) и заново применяет convert_price().
+         *
+         * @param int $offset  Пагинация (для AJAX-обработки большими батчами).
+         * @param int $batch   Размер батча.
+         * @return array       Статистика обработки.
+         * --------------------------------------------------------------------- */
+        public function recalculate_all_prices( $offset = 0, $batch = 100 ) {
+                $processed = 0;
+                $success   = 0;
+                $failed    = 0;
+                $skipped   = 0;
+                $errors    = array();
+
+                // Получаем все товары (включая вариации), у которых есть
+                // оригинальная цена BeeStore в мете.
+                $args = array(
+                        'post_type'      => array( 'product', 'product_variation' ),
+                        'post_status'    => 'any',
+                        'posts_per_page' => $batch,
+                        'offset'         => $offset,
+                        'fields'         => 'ids',
+                        'meta_query'     => array(
+                                array(
+                                        'key'     => '_bsi_original_price_gross',
+                                        'compare' => 'EXISTS',
+                                ),
+                        ),
+                        'orderby'        => 'ID',
+                        'order'          => 'ASC',
+                );
+
+                $query = new WP_Query( $args );
+                $total = $query->found_posts;
+
+                foreach ( $query->posts as $post_id ) {
+                        $processed++;
+
+                        $product = ( 'product_variation' === get_post_type( $post_id ) )
+                                ? wc_get_product( $post_id )
+                                : wc_get_product( $post_id );
+
+                        if ( ! $product ) {
+                                $failed++;
+                                $errors[] = sprintf( 'Product %d: не удалось загрузить', $post_id );
+                                continue;
+                        }
+
+                        // Читаем оригинальные цены из меты.
+                        $original_gross = (float) $product->get_meta( '_bsi_original_price_gross' );
+                        $original_disc  = (float) $product->get_meta( '_bsi_original_price_disc' );
+                        $original_disc_pct = (float) $product->get_meta( '_bsi_original_discount' );
+
+                        if ( $original_gross <= 0 ) {
+                                $skipped++;
+                                continue;
+                        }
+
+                        // Применяем текущую формулу.
+                        $price_gross_converted = $this->convert_price( $original_gross );
+                        $price_disc_converted  = $original_disc > 0 ? $this->convert_price( $original_disc ) : 0;
+
+                        if ( $price_gross_converted > 0 ) {
+                                $product->set_regular_price( wc_format_decimal( $price_gross_converted, 2 ) );
+                        }
+
+                        if ( $price_disc_converted > 0 && $price_disc_converted < $price_gross_converted ) {
+                                $product->set_sale_price( wc_format_decimal( $price_disc_converted, 2 ) );
+                                $product->set_price( wc_format_decimal( $price_disc_converted, 2 ) );
+                        } elseif ( $original_disc_pct > 0 && $price_gross_converted > 0 ) {
+                                $sale = $price_gross_converted * ( 1 - $original_disc_pct / 100 );
+                                $product->set_sale_price( wc_format_decimal( $sale, 2 ) );
+                                $product->set_price( wc_format_decimal( $sale, 2 ) );
+                        } else {
+                                $product->set_sale_price( '' );
+                                $product->set_price( wc_format_decimal( $price_gross_converted, 2 ) );
+                        }
+
+                        $product->save();
+                        $success++;
+                }
+
+                return array(
+                        'processed'    => $processed,
+                        'success'      => $success,
+                        'failed'       => $failed,
+                        'skipped'      => $skipped,
+                        'total'        => $total,
+                        'next_offset'  => $offset + $processed,
+                        'has_more'     => ( $offset + $processed ) < $total,
+                        'errors'       => $errors,
+                );
         }
 }

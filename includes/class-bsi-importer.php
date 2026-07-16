@@ -1541,21 +1541,41 @@ class BSI_Importer {
          * Базовые поля товара (название, описание, статус).
          * --------------------------------------------------------------------- */
         private function apply_common_fields( $product, $row ) {
-                // Название: модель + описание.
-                $title = isset( $row['DSArticoloWeb'] ) && $row['DSArticoloWeb']
-                        ? $row['DSArticoloWeb']
-                        : ( isset( $row['DSArticolo'] ) ? $row['DSArticolo'] : '' );
+                // Название: приоритет — DSArticoloAgg (наиболее понятное),
+                // затем DSArticoloWeb, затем DSArticolo (последнее средство).
+                $title = '';
+                if ( ! empty( $row['DSArticoloAgg'] ) ) {
+                        $title = $row['DSArticoloAgg'];
+                } elseif ( ! empty( $row['DSArticoloWeb'] ) ) {
+                        $title = $row['DSArticoloWeb'];
+                } elseif ( ! empty( $row['DSArticolo'] ) ) {
+                        $title = $row['DSArticolo'];
+                }
                 if ( $title ) {
                         $product->set_name( $title );
                 }
 
-                // Описание.
+                // Описание: Note + габариты (ArticoloDescrizionePers) + состав (DSMateriale).
                 $desc = '';
                 if ( ! empty( $row['Nota'] ) ) {
                         $desc .= $row['Nota'] . "\n\n";
                 }
                 if ( ! empty( $row['ArticoloDescrizionePers'] ) ) {
                         $desc .= $row['ArticoloDescrizionePers'];
+                }
+                // Материал/состав: DSMaterialeWeb если есть, иначе DSMateriale.
+                $materiale = '';
+                if ( ! empty( $row['DSMaterialeWeb'] ) ) {
+                        $materiale = $row['DSMaterialeWeb'];
+                } elseif ( ! empty( $row['DSMateriale'] ) ) {
+                        $materiale = $row['DSMateriale'];
+                }
+                if ( $materiale ) {
+                        // Добавляем в описание как отдельный блок "Состав".
+                        if ( $desc ) {
+                                $desc .= "\n\n";
+                        }
+                        $desc .= '<strong>Состав:</strong> ' . nl2br( esc_html( $materiale ) );
                 }
                 if ( $desc ) {
                         $product->set_description( wp_kses_post( $desc ) );
@@ -1645,16 +1665,25 @@ class BSI_Importer {
                 }
 
                 $settings = get_option( 'bsi_settings', array() );
-                $enabled  = isset( $settings['enable_price_conversion'] ) && '1' === $settings['enable_price_conversion'];
 
-                if ( ! $enabled ) {
-                        return $price;
-                }
+                // Конвертация цен ВСЕГДА применяется при импорте.
+                // (Раньше была опция enable_price_conversion, но она приводила
+                // к тому, что цены импортировались как есть в EUR. Теперь
+                // конвертация обязательна — настраивается только её параметры
+                // на отдельной вкладке «Конвертация цен» в разделе Импорта.)
 
                 $rate       = isset( $settings['currency_rate'] ) ? (float) $settings['currency_rate'] : 1;
                 $markup     = isset( $settings['markup_coefficient'] ) ? (float) $settings['markup_coefficient'] : 1;
                 $fixed      = isset( $settings['fixed_markup'] ) ? (float) $settings['fixed_markup'] : 0;
                 $round      = isset( $settings['round_prices'] ) && '1' === $settings['round_prices'];
+
+                // Защита от нулевого курса/коэффициента.
+                if ( $rate <= 0 ) {
+                        $rate = 1;
+                }
+                if ( $markup <= 0 ) {
+                        $markup = 1;
+                }
 
                 // Формула.
                 $result = ( $price * $rate * $markup ) + $fixed;
@@ -1789,6 +1818,42 @@ class BSI_Importer {
                 if ( ! empty( $row['DSCampionario'] ) && taxonomy_exists( 'pa_collezione' ) ) {
                         $coll_id = $this->ensure_term( $row['DSCampionario'], 'pa_collezione' );
                         wp_set_post_terms( $product_id, array( $coll_id ), 'pa_collezione' );
+                }
+
+                // Материал: DSMaterialeWeb если есть, иначе DSMateriale.
+                $materiale = '';
+                if ( ! empty( $row['DSMaterialeWeb'] ) ) {
+                        $materiale = $row['DSMaterialeWeb'];
+                } elseif ( ! empty( $row['DSMateriale'] ) ) {
+                        $materiale = $row['DSMateriale'];
+                }
+                if ( $materiale && taxonomy_exists( 'pa_materiale' ) ) {
+                        $mat_id = $this->ensure_term( $materiale, 'pa_materiale' );
+                        if ( $mat_id ) {
+                                wp_set_post_terms( $product_id, array( $mat_id ), 'pa_materiale' );
+                        }
+                }
+
+                // Тип размерной сетки: DSTipoTagliaWeb если есть, иначе DSTipoTaglia.
+                $tipo_taglia = '';
+                if ( ! empty( $row['DSTipoTagliaWeb'] ) ) {
+                        $tipo_taglia = $row['DSTipoTagliaWeb'];
+                } elseif ( ! empty( $row['DSTipoTaglia'] ) ) {
+                        $tipo_taglia = $row['DSTipoTaglia'];
+                }
+                if ( $tipo_taglia && taxonomy_exists( 'pa_tipo-taglia' ) ) {
+                        $tt_id = $this->ensure_term( $tipo_taglia, 'pa_tipo-taglia' );
+                        if ( $tt_id ) {
+                                wp_set_post_terms( $product_id, array( $tt_id ), 'pa_tipo-taglia' );
+                        }
+                }
+
+                // Indice — числовой индекс для сортировки размеров (S→M→L→XL).
+                if ( isset( $row['Indice'] ) && '' !== trim( $row['Indice'] ) ) {
+                        $indice = (int) $row['Indice'];
+                        if ( $indice > 0 ) {
+                                update_post_meta( $product_id, '_bsi_indice', $indice );
+                        }
                 }
         }
 

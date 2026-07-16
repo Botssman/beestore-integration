@@ -92,7 +92,6 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                         <a href="#bsi-sync" class="nav-tab" data-tab="sync"><?php esc_html_e( 'Синхронизация', 'beestore-integration' ); ?></a>
                         <a href="#bsi-images" class="nav-tab" data-tab="images"><?php esc_html_e( 'Картинки', 'beestore-integration' ); ?></a>
                         <a href="#bsi-payments" class="nav-tab" data-tab="payments"><?php esc_html_e( 'Платежи', 'beestore-integration' ); ?></a>
-                        <a href="#bsi-pricing" class="nav-tab" data-tab="pricing"><?php esc_html_e( 'Конвертация цен', 'beestore-integration' ); ?></a>
                 </h2>
 
                 <!-- FTP -->
@@ -523,190 +522,19 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                         </table>
                 </div>
 
-                <!-- Конвертация цен -->
-                <div id="bsi-pricing" class="bsi-tab" style="display:none;">
-                        <p>
-                                <?php
-                                echo wp_kses_post( __( '<strong>Формула обновления цены для каждого из поставщиков:</strong>', 'beestore-integration' ) );
-                                ?>
-                        </p>
-                        <p style="background:#f6f7f7;padding:15px 20px;border-left:4px solid #2271b1;font-size:14px;">
-                                <code style="font-size:14px;background:transparent;">
-                                        <?php esc_html_e( 'цена поставщика × курс валюты × коэффициент надбавки + фиксированная надбавка', 'beestore-integration' ); ?>
-                                </code>
-                        </p>
-                        <p class="description">
-                                <?php esc_html_e( 'Пример: 100 EUR × 100 (RUB/EUR) × 1.3 (наценка 30%) + 500 RUB = 13 500 RUB', 'beestore-integration' ); ?>
-                        </p>
-
-                        <table class="form-table" role="presentation" style="margin-top:20px;">
-                                <tr>
-                                        <th><?php esc_html_e( 'Включить конвертацию цен', 'beestore-integration' ); ?></th>
-                                        <td>
-                                                <label>
-                                                        <input type="checkbox" name="bsi_settings[enable_price_conversion]" value="1" <?php checked( $enable_price_conversion ); ?>>
-                                                        <?php esc_html_e( 'Применять формулу к ценам при импорте', 'beestore-integration' ); ?>
-                                                </label>
-                                                <p class="description">
-                                                        <?php esc_html_e( 'Если выключено — цены импортируются как есть (в валюте BeeStore).', 'beestore-integration' ); ?>
-                                                </p>
-                                        </td>
-                                </tr>
-                                <tr>
-                                        <th><label for="supplier_currency"><?php esc_html_e( 'Валюта поставщика (BeeStore)', 'beestore-integration' ); ?></label></th>
-                                        <td>
-                                                <select name="bsi_settings[supplier_currency]" id="supplier_currency">
-                                                        <?php
-                                                        $currencies = array( 'EUR', 'USD', 'GBP', 'RUB', 'CHF', 'JPY', 'CNY' );
-                                                        foreach ( $currencies as $cur ) {
-                                                                echo '<option value="' . esc_attr( $cur ) . '" ' . selected( $supplier_currency, $cur, false ) . '>' . esc_html( $cur ) . '</option>';
-                                                        }
-                                                        ?>
-                                                </select>
-                                                <p class="description"><?php esc_html_e( 'Валюта, в которой BeeStore присылает цены (PrezzoIvato). Обычно EUR.', 'beestore-integration' ); ?></p>
-                                        </td>
-                                </tr>
-                                <tr>
-                                        <th><label for="shop_currency"><?php esc_html_e( 'Валюта магазина (WooCommerce)', 'beestore-integration' ); ?></label></th>
-                                        <td>
-                                                <select name="bsi_settings[shop_currency]" id="shop_currency">
-                                                        <?php
-                                                        foreach ( $currencies as $cur ) {
-                                                                echo '<option value="' . esc_attr( $cur ) . '" ' . selected( $shop_currency, $cur, false ) . '>' . esc_html( $cur ) . '</option>';
-                                                        }
-                                                        ?>
-                                                </select>
-                                                <p class="description"><?php esc_html_e( 'Валюта вашего магазина. Должна совпадать с настройкой WooCommerce.', 'beestore-integration' ); ?></p>
-                                        </td>
-                                </tr>
-                                <tr>
-                                        <th><label for="currency_rate"><?php esc_html_e( 'Курс валюты', 'beestore-integration' ); ?></label></th>
-                                        <td>
-                                                <!-- Текущее состояние курса -->
-                                                <div id="bsi-rate-status" style="background:#f6f7f7;padding:10px 15px;border-radius:4px;margin-bottom:15px;">
-                                                        <strong style="font-size:16px;">
-                                                                1 <?php echo esc_html( $supplier_currency ); ?> = <span id="bsi-current-rate"><?php echo esc_html( number_format( $current_rate_info['rate'], 4, '.', '' ) ); ?></span> <?php echo esc_html( $shop_currency ); ?>
-                                                        </strong>
-                                                        <br>
-                                                        <small style="color:#666;">
-                                                                <?php esc_html_e( 'Источник:', 'beestore-integration' ); ?>
-                                                                <span id="bsi-rate-source"><?php echo esc_html( $source_label ); ?></span>
-                                                                <?php if ( ! empty( $current_rate_info['updated'] ) ) : ?>
-                                                                        | <?php esc_html_e( 'обновлён:', 'beestore-integration' ); ?>
-                                                                        <span id="bsi-rate-updated"><?php echo esc_html( $current_rate_info['updated'] ); ?></span>
-                                                                <?php endif; ?>
-                                                        </small>
-                                                </div>
-
-                                                <!-- Выбор режима -->
-                                                <label style="display:block;margin-bottom:10px;">
-                                                        <input type="radio" name="bsi_settings[currency_rate_mode]" value="manual" <?php checked( $currency_rate_mode, 'manual' ); ?>>
-                                                        <strong><?php esc_html_e( 'Ручной режим', 'beestore-integration' ); ?></strong> —
-                                                        <?php esc_html_e( 'вписать курс вручную ниже', 'beestore-integration' ); ?>
-                                                </label>
-                                                <label style="display:block;margin-bottom:10px;">
-                                                        <input type="radio" name="bsi_settings[currency_rate_mode]" value="auto" <?php checked( $currency_rate_mode, 'auto' ); ?>>
-                                                        <strong><?php esc_html_e( 'Автоматический режим', 'beestore-integration' ); ?></strong> —
-                                                        <?php esc_html_e( 'курс тянется онлайн через API (ежедневное обновление по cron)', 'beestore-integration' ); ?>
-                                                </label>
-
-                                                <!-- Ручной режим -->
-                                                <div id="bsi-manual-mode" style="margin-top:15px;<?php echo 'manual' === $currency_rate_mode ? '' : 'display:none;'; ?>">
-                                                        <input type="number" step="0.0001" min="0" name="bsi_settings[currency_rate]" id="currency_rate" value="<?php echo esc_attr( $currency_rate ); ?>" class="small-text">
-                                                        <p class="description">
-                                                                <?php
-                                                                echo esc_html( sprintf(
-                                                                        /* translators: 1: shop currency, 2: supplier currency */
-                                                                        __( 'Сколько единиц %1$s за 1 %2$s. Например: 100 = 100 RUB за 1 EUR.', 'beestore-integration' ),
-                                                                        $shop_currency,
-                                                                        $supplier_currency
-                                                                ) );
-                                                                ?>
-                                                        </p>
-                                                </div>
-
-                                                <!-- Авто режим -->
-                                                <div id="bsi-auto-mode" style="margin-top:15px;<?php echo 'auto' === $currency_rate_mode ? '' : 'display:none;'; ?>">
-                                                        <label style="display:block;margin-bottom:8px;">
-                                                                <?php esc_html_e( 'Источник курса:', 'beestore-integration' ); ?>
-                                                                <select name="bsi_settings[currency_rate_auto_source]" id="currency_rate_auto_source">
-                                                                        <option value="auto" <?php selected( $currency_rate_auto_source, 'auto' ); ?>>
-                                                                                <?php esc_html_e( 'Авто (рекомендуется) — лучший источник по валюте', 'beestore-integration' ); ?>
-                                                                        </option>
-                                                                        <option value="cbrf" <?php selected( $currency_rate_auto_source, 'cbrf' ); ?>>
-                                                                                <?php esc_html_e( 'ЦБ РФ (только для RUB)', 'beestore-integration' ); ?>
-                                                                        </option>
-                                                                        <option value="ecb" <?php selected( $currency_rate_auto_source, 'ecb' ); ?>>
-                                                                                <?php esc_html_e( 'Европейский ЦБ (ECB)', 'beestore-integration' ); ?>
-                                                                        </option>
-                                                                        <option value="er_api" <?php selected( $currency_rate_auto_source, 'er_api' ); ?>>
-                                                                                <?php esc_html_e( 'open.er-api.com (универсальный)', 'beestore-integration' ); ?>
-                                                                        </option>
-                                                                </select>
-                                                        </label>
-                                                        <p class="description" style="margin-bottom:15px;">
-                                                                <?php esc_html_e( 'В авто-режиме курс обновляется автоматически каждый день в 06:00. Также можно обновить вручную кнопкой ниже.', 'beestore-integration' ); ?>
-                                                        </p>
-                                                        <button type="button" class="button button-secondary" id="bsi-refresh-rate">
-                                                                <span class="dashicons dashicons-update"></span>
-                                                                <?php esc_html_e( 'Обновить курс сейчас', 'beestore-integration' ); ?>
-                                                        </button>
-                                                        <span id="bsi-refresh-status" style="margin-left:10px;"></span>
-                                                </div>
-                                        </td>
-                                </tr>
-                                <tr>
-                                        <th><label for="markup_coefficient"><?php esc_html_e( 'Коэффициент надбавки', 'beestore-integration' ); ?></label></th>
-                                        <td>
-                                                <input type="number" step="0.01" min="0" name="bsi_settings[markup_coefficient]" id="markup_coefficient" value="<?php echo esc_attr( $markup_coefficient ); ?>" class="small-text">
-                                                <p class="description">
-                                                        <?php esc_html_e( 'Множитель наценки. 1.0 = без надбавки, 1.3 = +30%, 1.5 = +50%, 2.0 = +100%.', 'beestore-integration' ); ?>
-                                                </p>
-                                        </td>
-                                </tr>
-                                <tr>
-                                        <th><label for="fixed_markup"><?php esc_html_e( 'Фиксированная надбавка', 'beestore-integration' ); ?></label></th>
-                                        <td>
-                                                <input type="number" step="0.01" min="0" name="bsi_settings[fixed_markup]" id="fixed_markup" value="<?php echo esc_attr( $fixed_markup ); ?>" class="small-text">
-                                                <p class="description">
-                                                        <?php
-                                                        echo esc_html( sprintf(
-                                                                /* translators: 1: shop currency */
-                                                                __( 'Фиксированная сумма, добавляемая к каждой цене (в %s). Например: 500 = +500 к каждой цене.', 'beestore-integration' ),
-                                                                $shop_currency
-                                                        ) );
-                                                        ?>
-                                                </p>
-                                        </td>
-                                </tr>
-                                <tr>
-                                        <th><?php esc_html_e( 'Округлять цены до целых', 'beestore-integration' ); ?></th>
-                                        <td>
-                                                <label>
-                                                        <input type="checkbox" name="bsi_settings[round_prices]" value="1" <?php checked( $round_prices ); ?>>
-                                                        <?php esc_html_e( 'Округлять итоговую цену до целого числа (например, 13 549.78 → 13 550)', 'beestore-integration' ); ?>
-                                                </label>
-                                        </td>
-                                </tr>
-                        </table>
-
-                        <?php if ( $enable_price_conversion ) : ?>
-                                <div style="background:#e7f5ed;border:1px solid #46b450;border-radius:4px;padding:15px 20px;margin-top:20px;">
-                                        <h3 style="margin-top:0;"><?php esc_html_e( 'Пример расчёта', 'beestore-integration' ); ?></h3>
-                                        <?php
-                                        $example_supplier = 100;
-                                        $example_result = ( $example_supplier * $currency_rate * $markup_coefficient ) + $fixed_markup;
-                                        ?>
-                                        <p>
-                                                Товар в BeeStore стоит <strong><?php echo esc_html( $example_supplier ); ?> <?php echo esc_html( $supplier_currency ); ?></strong>.<br>
-                                                После конвертации в магазине:
-                                                <strong><?php echo esc_html( number_format( $example_result, 2, ',', ' ' ) ); ?> <?php echo esc_html( $shop_currency ); ?></strong>
-                                        </p>
-                                        <p style="font-size:12px;color:#666;">
-                                                Формула: <?php echo esc_html( $example_supplier ); ?> × <?php echo esc_html( $currency_rate ); ?> × <?php echo esc_html( $markup_coefficient ); ?> + <?php echo esc_html( $fixed_markup ); ?> = <?php echo esc_html( number_format( $example_result, 2, '.', '' ) ); ?>
-                                        </p>
-                                </div>
-                        <?php endif; ?>
+                <!-- Конвертация цен переехала на отдельную страницу -->
+                <div id="bsi-pricing-moved" class="bsi-tab" style="display:none;">
+                        <div class="notice notice-info" style="border-left-color:#2271b1;">
+                                <p>
+                                        <strong><?php esc_html_e( 'Раздел «Конвертация цен» переехал.', 'beestore-integration' ); ?></strong>
+                                        <?php esc_html_e( 'Все настройки курса валют, наценок и округления теперь находятся на отдельной странице — это упрощает их изменение без правки остальных настроек плагина.', 'beestore-integration' ); ?>
+                                </p>
+                                <p>
+                                        <a href="<?php echo esc_url( admin_url( 'admin.php?page=bsi-pricing' ) ); ?>" class="button button-primary">
+                                                <?php esc_html_e( 'Перейти к конвертации цен →', 'beestore-integration' ); ?>
+                                        </a>
+                                </p>
+                        </div>
                 </div>
 
                 <?php submit_button( __( 'Сохранить настройки', 'beestore-integration' ) ); ?>
@@ -723,44 +551,6 @@ jQuery(document).ready(function($){
                 $('.bsi-tab').hide();
                 $('#bsi-' + tab).show();
         });
-
-        // Переключение режима курса (manual / auto).
-        $('input[name="bsi_settings[currency_rate_mode]"]').on('change', function(){
-                var mode = $(this).val();
-                $('#bsi-manual-mode').toggle('manual' === mode);
-                $('#bsi-auto-mode').toggle('auto' === mode);
-        });
-
-        // AJAX обновление курса.
-        $('#bsi-refresh-rate').on('click', function(){
-                var $btn = $(this);
-                var $status = $('#bsi-refresh-status');
-                $btn.prop('disabled', true);
-                $status.html('<span class="bsi-spinner"></span> Обновление...');
-
-                $.post(bsiAdmin.ajaxUrl, {
-                        action: 'bsi_refresh_rate',
-                        nonce: bsiAdmin.nonce
-                }, function(response){
-                        $btn.prop('disabled', false);
-                        if (response.success) {
-                                var d = response.data;
-                                $status.html('<span style="color:#2e7d32;">✓ ' + d.message + '</span>');
-                                // Обновляем отображение.
-                                $('#bsi-current-rate').text(parseFloat(d.rate).toFixed(4));
-                                $('#bsi-rate-source').text(d.source);
-                                if ($('#bsi-rate-updated').length) {
-                                        $('#bsi-rate-updated').text(d.updated);
-                                } else {
-                                        $('#bsi-rate-source').after(' | обновлён: <span id="bsi-rate-updated">' + d.updated + '</span>');
-                                }
-                        } else {
-                                $status.html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
-                        }
-                }).fail(function(){
-                        $btn.prop('disabled', false);
-                        $status.html('<span style="color:#c62828;">✗ AJAX error</span>');
-                });
-        });
 });
 </script>
+

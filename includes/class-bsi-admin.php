@@ -39,6 +39,15 @@ class BSI_Admin {
 
                 add_submenu_page(
                         'beestore-integration',
+                        __( 'Конвертация цен', 'beestore-integration' ),
+                        __( 'Конвертация цен', 'beestore-integration' ),
+                        $cap,
+                        'bsi-pricing',
+                        array( $this, 'render_pricing_page' )
+                );
+
+                add_submenu_page(
+                        'beestore-integration',
                         __( 'Каталог с FTP', 'beestore-integration' ),
                         __( 'Каталог с FTP', 'beestore-integration' ),
                         $cap,
@@ -124,6 +133,37 @@ class BSI_Admin {
                 $upload_url = trailingslashit( $upload['baseurl'] ) . 'beestore/downloads';
 
                 include BSI_PLUGIN_DIR . 'templates/import-page.php';
+        }
+
+        /**
+         * Страница «Конвертация цен» — отдельный раздел под Импортом.
+         */
+        public function render_pricing_page() {
+                // Сохранение формы.
+                if ( isset( $_POST['bsi_pricing_submit'] ) && check_admin_referer( 'bsi_pricing_save', 'bsi_pricing_nonce' ) ) {
+                        $settings = get_option( 'bsi_settings', array() );
+
+                        // Принудительно включаем конвертацию (теперь это обязательно).
+                        $settings['enable_price_conversion'] = '1';
+
+                        $settings['supplier_currency'] = isset( $_POST['supplier_currency'] ) ? sanitize_text_field( wp_unslash( $_POST['supplier_currency'] ) ) : 'EUR';
+                        $settings['shop_currency']     = isset( $_POST['shop_currency'] ) ? sanitize_text_field( wp_unslash( $_POST['shop_currency'] ) ) : 'RUB';
+                        $settings['currency_rate_mode'] = isset( $_POST['currency_rate_mode'] ) ? sanitize_text_field( wp_unslash( $_POST['currency_rate_mode'] ) ) : 'manual';
+                        $settings['currency_rate_auto_source'] = isset( $_POST['currency_rate_auto_source'] ) ? sanitize_text_field( wp_unslash( $_POST['currency_rate_auto_source'] ) ) : 'auto';
+
+                        $rate   = isset( $_POST['currency_rate'] ) ? floatval( wp_unslash( $_POST['currency_rate'] ) ) : 1;
+                        $markup = isset( $_POST['markup_coefficient'] ) ? floatval( wp_unslash( $_POST['markup_coefficient'] ) ) : 1;
+                        $fixed  = isset( $_POST['fixed_markup'] ) ? floatval( wp_unslash( $_POST['fixed_markup'] ) ) : 0;
+                        $settings['currency_rate']     = $rate > 0 ? $rate : 1;
+                        $settings['markup_coefficient'] = $markup > 0 ? $markup : 1;
+                        $settings['fixed_markup']       = $fixed;
+                        $settings['round_prices']       = isset( $_POST['round_prices'] ) ? '1' : '0';
+
+                        update_option( 'bsi_settings', $settings );
+                        echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Настройки конвертации цен сохранены.', 'beestore-integration' ) . '</p></div>';
+                }
+
+                include BSI_PLUGIN_DIR . 'templates/pricing-page.php';
         }
 
         public function render_logs_page() {

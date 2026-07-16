@@ -203,6 +203,9 @@ class BSI_Settings {
                 // Конвертация цен — сохраняется на отдельной странице (admin.php?page=bsi-pricing).
                 // Здесь НЕ берём из $input, чтобы не сбросить настройки при сохранении формы настроек.
                 // Принудительно включаем (теперь конвертация обязательна при импорте).
+                // ВАЖНО: с v1.6.4 авто-курс живёт в отдельной опции 'bsi_currency_rate_auto'
+                // и форма настроек его не трогает. bsi_settings['currency_rate'] используется
+                // только в ручном режиме.
                 $output['enable_price_conversion'] = '1';
                 $output['currency_rate']           = isset( $current['currency_rate'] ) ? (float) $current['currency_rate'] : 1;
                 $output['currency_rate_mode']      = isset( $current['currency_rate_mode'] ) ? $current['currency_rate_mode'] : 'manual';
@@ -213,6 +216,11 @@ class BSI_Settings {
                 $output['shop_currency']           = isset( $current['shop_currency'] ) ? $current['shop_currency'] : 'RUB';
                 $output['round_prices']            = isset( $current['round_prices'] ) ? $current['round_prices'] : '0';
 
+                // Старые поля (для обратной совместимости) — больше не используются
+                // в авто-режиме, но не удаляем, чтобы не сломать ничего.
+                $output['currency_rate_last_source'] = isset( $current['currency_rate_last_source'] ) ? $current['currency_rate_last_source'] : '';
+                $output['currency_rate_last_update'] = isset( $current['currency_rate_last_update'] ) ? $current['currency_rate_last_update'] : '';
+
                 // Если курс задан неверно (0 или меньше) — сбрасываем на 1.
                 if ( $output['currency_rate'] <= 0 ) {
                         $output['currency_rate'] = 1;
@@ -220,10 +228,6 @@ class BSI_Settings {
                 if ( $output['markup_coefficient'] <= 0 ) {
                         $output['markup_coefficient'] = 1;
                 }
-
-                // Сохраняем информацию о последнем авто-обновлении (не из формы, а из текущих опций).
-                $output['currency_rate_last_source'] = isset( $current['currency_rate_last_source'] ) ? $current['currency_rate_last_source'] : '';
-                $output['currency_rate_last_update'] = isset( $current['currency_rate_last_update'] ) ? $current['currency_rate_last_update'] : '';
 
                 // WebP конвертация.
                 $output['webp_enabled']  = isset( $input['webp_enabled'] ) ? '1' : '0';

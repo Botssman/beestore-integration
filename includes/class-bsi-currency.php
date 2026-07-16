@@ -35,6 +35,10 @@ class BSI_Currency {
         /**
          * Получить текущий курс.
          *
+         * ВАЖНО: в авто-режиме курс читается из ОТДЕЛЬНОЙ опции 'bsi_currency_rate_auto',
+         * а не из bsi_settings. Это сделано чтобы НИКАКИЕ сохранения формы настроек
+         * или sanitize_settings не могли затереть AJAX-полученный курс.
+         *
          * @return array [ 'rate' => float, 'source' => string, 'updated' => string, 'mode' => string ]
          */
         public function get_current_rate() {
@@ -42,22 +46,35 @@ class BSI_Currency {
                 $mode     = isset( $settings['currency_rate_mode'] ) ? $settings['currency_rate_mode'] : 'manual';
 
                 if ( 'auto' === $mode ) {
-                        // В авто-режиме берём сохранённый курс (последний полученный от API).
+                        // В авто-режиме берём сохранённый курс из отдельной опции.
+                        $auto = get_option( 'bsi_currency_rate_auto', array() );
                         return array(
-                                'rate'    => isset( $settings['currency_rate'] ) ? (float) $settings['currency_rate'] : 1,
-                                'source'  => isset( $settings['currency_rate_last_source'] ) ? $settings['currency_rate_last_source'] : '',
-                                'updated' => isset( $settings['currency_rate_last_update'] ) ? $settings['currency_rate_last_update'] : '',
+                                'rate'    => isset( $auto['rate'] ) ? (float) $auto['rate'] : 1,
+                                'source'  => isset( $auto['source'] ) ? $auto['source'] : '',
+                                'updated' => isset( $auto['updated'] ) ? $auto['updated'] : '',
                                 'mode'    => 'auto',
                         );
                 }
 
-                // Ручной режим.
+                // Ручной режим — из bsi_settings.
                 return array(
                         'rate'    => isset( $settings['currency_rate'] ) ? (float) $settings['currency_rate'] : 1,
                         'source'  => 'manual',
                         'updated' => '',
                         'mode'    => 'manual',
                 );
+        }
+
+        /**
+         * Получить актуальный курс для конвертации цен (число).
+         * Используется в BSI_Importer::convert_price().
+         *
+         * @return float
+         */
+        public function get_rate_for_conversion() {
+                $info = $this->get_current_rate();
+                $rate = (float) $info['rate'];
+                return $rate > 0 ? $rate : 1;
         }
 
         /**
@@ -146,14 +163,22 @@ class BSI_Currency {
         }
 
         /**
-         * Сохранить авто-курс в опциях.
+         * Сохранить авто-курс в ОТДЕЛЬНОЙ опции 'bsi_currency_rate_auto'.
+         *
+         * ВАЖНО: НЕ пишем в bsi_settings, чтобы форма настроек не могла затереть курс.
+         * Раньше курс лежал в bsi_settings['currency_rate'] и любая форма настроек
+         * могла его перезаписать (особенно в авто-режиме, когда поле курса скрыто).
          */
         private function save_auto_rate( $rate, $source ) {
-                $settings = get_option( 'bsi_settings', array() );
-                $settings['currency_rate']             = (float) $rate;
-                $settings['currency_rate_last_source'] = $source;
-                $settings['currency_rate_last_update'] = current_time( 'mysql' );
-                update_option( 'bsi_settings', $settings );
+                $auto = array(
+                        'rate'    => (float) $rate,
+                        'source'  => $source,
+                        'updated' => current_time( 'mysql' ),
+                );
+                update_option( 'bsi_currency_rate_auto', $auto, false );
+
+                // Логируем для отладки.
+                BSI_Logger::instance()->info( 'currency', 'Авто-курс сохранён в отдельную опцию', $auto );
         }
 
         /**

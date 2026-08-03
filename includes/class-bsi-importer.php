@@ -1037,7 +1037,39 @@ class BSI_Importer {
                         try {
                                 $product->set_sku( $sku );
                         } catch ( Exception $e ) {
-                                $this->log( 'warning', 'Конфликт SKU', array( 'sku' => $sku, 'err' => $e->getMessage() ) );
+                                // Конфликт SKU — уже есть в другом товаре.
+                                $existing_id = wc_get_product_id_by_sku( $sku );
+                                if ( $existing_id && (int) $existing_id !== (int) $product->get_id() ) {
+                                        $existing_product = wc_get_product( $existing_id );
+                                        if ( $existing_product ) {
+                                                $existing_product->set_sku( '' );
+                                                $existing_product->save();
+                                                $this->log( 'warning', 'Освобождён SKU у старого товара (simple)', array(
+                                                        'sku'             => $sku,
+                                                        'old_product_id'  => $existing_id,
+                                                        'new_product_id'  => $product->get_id(),
+                                                        'igu'             => isset( $row['IGUArticolo'] ) ? $row['IGUArticolo'] : '',
+                                                        'modello'         => isset( $row['Modello'] ) ? $row['Modello'] : '',
+                                                ) );
+                                                try {
+                                                        $product->set_sku( $sku );
+                                                } catch ( Exception $e2 ) {
+                                                        $this->log( 'warning', 'Конфликт SKU (повтор)', array(
+                                                                'sku'      => $sku,
+                                                                'err'      => $e2->getMessage(),
+                                                                'igu'      => isset( $row['IGUArticolo'] ) ? $row['IGUArticolo'] : '',
+                                                                'modello'  => isset( $row['Modello'] ) ? $row['Modello'] : '',
+                                                        ) );
+                                                }
+                                        }
+                                } else {
+                                        $this->log( 'warning', 'Конфликт SKU', array(
+                                                'sku'      => $sku,
+                                                'err'      => $e->getMessage(),
+                                                'igu'      => isset( $row['IGUArticolo'] ) ? $row['IGUArticolo'] : '',
+                                                'modello'  => isset( $row['Modello'] ) ? $row['Modello'] : '',
+                                        ) );
+                                }
                         }
                 }
 
@@ -1549,6 +1581,25 @@ class BSI_Importer {
                 $cod_articolo = isset( $row['CodArticolo'] ) ? $row['CodArticolo'] : '';
                 $variation_id = $cod_articolo ? $this->find_variation_by_meta( '_bsi_cod_articolo', $cod_articolo, $product_id ) : 0;
 
+                // Если по meta не нашли — пробуем найти по SKU (вариация могла быть
+                // импортирована старой версией плагина без meta _bsi_cod_articolo).
+                if ( ! $variation_id && $cod_articolo ) {
+                        $existing_by_sku = wc_get_product_id_by_sku( $cod_articolo );
+                        if ( $existing_by_sku ) {
+                                $existing_product = wc_get_product( $existing_by_sku );
+                                // Убеждаемся, что это вариация того же родителя.
+                                if ( $existing_product instanceof WC_Product_Variation
+                                        && $existing_product->get_parent_id() == $product_id ) {
+                                        $variation_id = $existing_by_sku;
+                                        $this->log( 'info', 'Вариация найдена по SKU (а не по meta)', array(
+                                                'sku'           => $cod_articolo,
+                                                'variation_id'  => $variation_id,
+                                                'parent_id'     => $product_id,
+                                        ) );
+                                }
+                        }
+                }
+
                 $variation = ( $variation_id )
                         ? wc_get_product( $variation_id )
                         : new WC_Product_Variation();
@@ -1586,7 +1637,49 @@ class BSI_Importer {
                         try {
                                 $variation->set_sku( $cod_articolo );
                         } catch ( Exception $e ) {
-                                $this->log( 'warning', 'Конфликт SKU variation', array( 'sku' => $cod_articolo, 'err' => $e->getMessage() ) );
+                                // Конфликт SKU — уже есть в другом товаре.
+                                // Пытаемся разрешить: найти товар с этим SKU и,
+                                // если это другой родитель — освободить SKU.
+                                $existing_id = wc_get_product_id_by_sku( $cod_articolo );
+                                if ( $existing_id && (int) $existing_id !== (int) $variation->get_id() ) {
+                                        $existing_product = wc_get_product( $existing_id );
+                                        if ( $existing_product ) {
+                                                // Освобождаем SKU у старого товара.
+                                                $existing_product->set_sku( '' );
+                                                $existing_product->save();
+                                                $this->log( 'warning', 'Освобождён SKU у старого товара', array(
+                                                        'sku'                  => $cod_articolo,
+                                                        'old_product_id'       => $existing_id,
+                                                        'old_parent_id'        => $existing_product instanceof WC_Product_Variation ? $existing_product->get_parent_id() : 0,
+                                                        'new_variation_id'     => $variation->get_id(),
+                                                        'new_parent_id'        => $product_id,
+                                                ) );
+                                                // Повторно пытаемся установить SKU.
+                                                try {
+                                                        $variation->set_sku( $cod_articolo );
+                                                } catch ( Exception $e2 ) {
+                                                        $this->log( 'warning', 'Конфликт SKU variation (повтор)', array(
+                                                                'sku'      => $cod_articolo,
+                                                                'err'      => $e2->getMessage(),
+                                                                'igu'      => isset( $row['IGUArticolo'] ) ? $row['IGUArticolo'] : '',
+                                                                'modello'  => isset( $row['Modello'] ) ? $row['Modello'] : '',
+                                                                'colore'   => isset( $row['DSColore'] ) ? $row['DSColore'] : '',
+                                                                'taglia'   => isset( $row['Taglia'] ) ? $row['Taglia'] : '',
+                                                                'parent'   => $product_id,
+                                                        ) );
+                                                }
+                                        }
+                                } else {
+                                        $this->log( 'warning', 'Конфликт SKU variation', array(
+                                                'sku'      => $cod_articolo,
+                                                'err'      => $e->getMessage(),
+                                                'igu'      => isset( $row['IGUArticolo'] ) ? $row['IGUArticolo'] : '',
+                                                'modello'  => isset( $row['Modello'] ) ? $row['Modello'] : '',
+                                                'colore'   => isset( $row['DSColore'] ) ? $row['DSColore'] : '',
+                                                'taglia'   => isset( $row['Taglia'] ) ? $row['Taglia'] : '',
+                                                'parent'   => $product_id,
+                                        ) );
+                                }
                         }
                 }
 

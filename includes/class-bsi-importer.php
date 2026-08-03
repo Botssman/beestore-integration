@@ -52,6 +52,9 @@ class BSI_Importer {
                 // AJAX: полная очистка товаров и категорий BeeStore.
                 add_action( 'wp_ajax_bsi_purge_all', array( $this, 'ajax_purge_all' ) );
 
+                // AJAX: удалить только картинки, импортированные плагином.
+                add_action( 'wp_ajax_bsi_purge_images', array( $this, 'ajax_purge_images' ) );
+
                 // AJAX: скачать CSV с FTP для настройки фильтров (без запуска импорта).
                 add_action( 'wp_ajax_bsi_download_csv_for_filters', array( $this, 'ajax_download_csv_for_filters' ) );
 
@@ -637,6 +640,62 @@ class BSI_Importer {
                         ),
                         'deleted_products' => $deleted_products,
                         'deleted_terms'    => $deleted_terms,
+                ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: удалить только картинки (attachments) импортированные плагином.
+         * --------------------------------------------------------------------- */
+        public function ajax_purge_images() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                global $wpdb;
+
+                // 1. Ищем attachments по meta _bsi_imported_by = 'beestore-integration'.
+                $ids = $wpdb->get_col( $wpdb->prepare(
+                        "SELECT post_id FROM {$wpdb->postmeta}
+                         WHERE meta_key = %s AND meta_value = %s",
+                        '_bsi_imported_by',
+                        'beestore-integration'
+                ) );
+
+                // 2. Также ищем по _bsi_image_basename (для картинок импортированных старыми версиями).
+                $ids_legacy = $wpdb->get_col(
+                        "SELECT post_id FROM {$wpdb->postmeta}
+                         WHERE meta_key = '_bsi_image_basename'"
+                );
+
+                $all_ids = array_unique( array_merge( $ids, $ids_legacy ) );
+
+                $deleted = 0;
+                $failed  = 0;
+                foreach ( $all_ids as $attach_id ) {
+                        $attach_id = (int) $attach_id;
+                        if ( wp_delete_attachment( $attach_id, true ) ) {
+                                $deleted++;
+                        } else {
+                                $failed++;
+                        }
+                }
+
+                $this->log( 'info', 'Очистка картинок BeeStore', array(
+                        'deleted'     => $deleted,
+                        'failed'      => $failed,
+                        'total_found' => count( $all_ids ),
+                ) );
+
+                wp_send_json_success( array(
+                        'message'     => sprintf(
+                                /* translators: 1: deleted count */
+                                _n( 'Удалено картинок: %d', 'Удалено картинок: %d', $deleted, 'beestore-integration' ),
+                                $deleted
+                        ),
+                        'deleted'     => $deleted,
+                        'failed'      => $failed,
+                        'total_found' => count( $all_ids ),
                 ) );
         }
 
@@ -2120,9 +2179,16 @@ class BSI_Importer {
         /**
          * Скачать картинку и привязать к товару (или использовать hotlink).
          *
-         * Переиспользование: ищет существующую картинку по basename без расширения.
-         * Например: URL "http://...2000019668213_1.jpg" → ищем "2000019668213_1"
-         * Если уже скачана (как .webp или .jpg) — переиспользуем, не качаем заново.
+         * Умное переиспользование:
+         *  1. Извлекаем basename без расширения (например "2000019668213_1")
+         *  2. Ищем существующий attachment по meta _bsi_image_basename
+         *  3. Если найден — проверяем, изменился ли файл на сервере (HEAD запрос)
+         *  4. Если не изменился — переиспользуем (НЕ скачиваем, НЕ конвертируем)
+         *  5. Если изменился или не найден — скачиваем, конвертируем в WebP
+         *
+         * WebP стратегия:
+         *  - Если WebP получился МЕНЬШЕ оригинала — оставляем WebP, удаляем JPG
+         *  - Если WebP получился БОЛЬШЕ — оставляем оригинал, удаляем WebP
          *
          * @param string $url
          * @param int    $product_id
@@ -2149,7 +2215,20 @@ class BSI_Importer {
                 if ( $existing_by_name ) {
                         // Сохраняем URL в meta для будущего точного поиска.
                         update_post_meta( $existing_by_name, '_bsi_image_url', $url );
-                        return $existing_by_name;
+
+                        // Проверяем, изменился ли файл на сервере BeeStore.
+                        if ( $this->image_changed_on_server( $url, $existing_by_name ) ) {
+                                // Файл изменился — нужно перескачать.
+                                $this->log( 'info', 'Картинка изменилась на сервере — перескачиваем', array(
+                                        'url'             => $url,
+                                        'attachment_id'   => $existing_by_name,
+                                ) );
+                                // Удаляем старый attachment и скачиваем заново.
+                                wp_delete_attachment( $existing_by_name, true );
+                        } else {
+                                // Файл не изменился — просто переиспользуем.
+                                return $existing_by_name;
+                        }
                 }
 
                 if ( ! $download ) {
@@ -2166,6 +2245,15 @@ class BSI_Importer {
                 // Сохраняем meta.
                 update_post_meta( $attach_id, '_bsi_image_url', $url );
                 update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
+                update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
+
+                // Сохраняем информацию о файле на сервере для будущих проверок изменения.
+                $server_info = $this->get_image_server_info( $url );
+                if ( $server_info ) {
+                        update_post_meta( $attach_id, '_bsi_image_etag', $server_info['etag'] );
+                        update_post_meta( $attach_id, '_bsi_image_last_modified', $server_info['last_modified'] );
+                        update_post_meta( $attach_id, '_bsi_image_size', $server_info['size'] );
+                }
 
                 // Конвертация в WebP (если включена).
                 $settings = get_option( 'bsi_settings', array() );
@@ -2176,6 +2264,84 @@ class BSI_Importer {
                 }
 
                 return $attach_id;
+        }
+
+        /**
+         * Получить информацию о файле на сервере BeeStore через HTTP HEAD.
+         *
+         * Возвращает: array( 'etag' => ..., 'last_modified' => ..., 'size' => ... )
+         * или false если запрос не удался.
+         *
+         * @param string $url
+         * @return array|false
+         */
+        private function get_image_server_info( $url ) {
+                $response = wp_remote_head( $url, array(
+                        'timeout'    => 15,
+                        'user-agent' => 'BeeStoreIntegration/' . BSI_VERSION,
+                ) );
+
+                if ( is_wp_error( $response ) ) {
+                        return false;
+                }
+
+                $code = wp_remote_retrieve_response_code( $response );
+                if ( 200 !== (int) $code ) {
+                        return false;
+                }
+
+                return array(
+                        'etag'          => wp_remote_retrieve_header( $response, 'etag' ),
+                        'last_modified' => wp_remote_retrieve_header( $response, 'last-modified' ),
+                        'size'          => (int) wp_remote_retrieve_header( $response, 'content-length' ),
+                );
+        }
+
+        /**
+         * Проверить, изменился ли файл на сервере по сравнению с сохранённым ранее.
+         *
+         * Сравнение по ETag (приоритет) или Last-Modified или Content-Length.
+         * Если ETag совпадает — файл не изменился.
+         * Если ETag нет, но Last-Modified совпадает — не изменился.
+         * Если ничего нет — сравниваем по Content-Length.
+         *
+         * @param string $url
+         * @param int    $attachment_id
+         * @return bool true — изменился (нужно перескачать), false — не изменился.
+         */
+        private function image_changed_on_server( $url, $attachment_id ) {
+                $saved_etag    = get_post_meta( $attachment_id, '_bsi_image_etag', true );
+                $saved_lastmod = get_post_meta( $attachment_id, '_bsi_image_last_modified', true );
+                $saved_size    = (int) get_post_meta( $attachment_id, '_bsi_image_size', true );
+
+                // Если ничего не сохранено — считаем, что изменился (перестраховка).
+                if ( ! $saved_etag && ! $saved_lastmod && ! $saved_size ) {
+                        return true;
+                }
+
+                $server_info = $this->get_image_server_info( $url );
+                if ( ! $server_info ) {
+                        // Не удалось проверить — считаем, что не изменился (чтобы не дёргать сервер).
+                        return false;
+                }
+
+                // 1. ETag — самый надёжный.
+                if ( ! empty( $server_info['etag'] ) && ! empty( $saved_etag ) ) {
+                        return $server_info['etag'] !== $saved_etag;
+                }
+
+                // 2. Last-Modified.
+                if ( ! empty( $server_info['last_modified'] ) && ! empty( $saved_lastmod ) ) {
+                        return $server_info['last_modified'] !== $saved_lastmod;
+                }
+
+                // 3. Content-Length — менее надёжный, но лучше чем ничего.
+                if ( $server_info['size'] > 0 && $saved_size > 0 ) {
+                        return $server_info['size'] !== $saved_size;
+                }
+
+                // Ничего не можем сравнить — считаем, что не изменился.
+                return false;
         }
 
         /**
@@ -2231,6 +2397,15 @@ class BSI_Importer {
                 $result = BSI_WebP::instance()->convert( $file, null, $strategy );
 
                 if ( is_wp_error( $result ) ) {
+                        // Если WebP получился больше оригинала — это не ошибка, а осознанный skip.
+                        // Логируем как info, не как warning.
+                        if ( 'bsi_webp_larger' === $result->get_error_code() ) {
+                                $this->log( 'info', 'WebP больше оригинала — оставлен JPG', array(
+                                        'file'   => basename( $file ),
+                                        'reason' => $result->get_error_message(),
+                                ) );
+                                return false;
+                        }
                         $this->log( 'warning', 'WebP конвертация не удалась', array(
                                 'file'  => basename( $file ),
                                 'error' => $result->get_error_message(),

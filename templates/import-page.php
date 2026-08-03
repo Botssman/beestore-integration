@@ -201,6 +201,26 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                         </button>
                         <span id="bsi-purge-status" style="margin-left:10px;"></span>
                 </p>
+
+                <hr style="margin:20px 0;border:none;border-top:1px solid #ddd;">
+
+                <h3 style="color:#b88000;margin-top:20px;">
+                        <span class="dashicons dashicons-images-alt2"></span>
+                        <?php esc_html_e( 'Очистка только картинок', 'beestore-integration' ); ?>
+                </h3>
+                <p>
+                        <?php esc_html_e( 'Удалить из Media Library все картинки, импортированные плагином BeeStore (по meta _bsi_imported_by и _bsi_image_basename).', 'beestore-integration' ); ?>
+                </p>
+                <p>
+                        <?php esc_html_e( 'Полезно, когда накопились дубликаты (2000019154266_3.jpg, 2000019154266_3-1.jpg, 2000019154266_3-2.jpg …) или когда нужно пересоздать картинки с нуля после ошибки. Товары остаются на месте — следующий импорт заново скачает картинки.', 'beestore-integration' ); ?>
+                </p>
+                <p>
+                        <button type="button" class="button button-secondary" id="bsi-purge-images" onclick="return confirm('<?php esc_attr_e( 'Удалить все картинки BeeStore из Media Library? Это необратимо!', 'beestore-integration' ); ?>')">
+                                <span class="dashicons dashicons-trash"></span>
+                                <?php esc_html_e( 'Удалить только картинки BeeStore', 'beestore-integration' ); ?>
+                        </button>
+                        <span id="bsi-purge-images-status" style="margin-left:10px;"></span>
+                </p>
         </div>
 
         <!-- Последний импорт -->
@@ -567,6 +587,37 @@ jQuery(document).ready(function($){
                 }).fail(function() {
                         $btn.prop('disabled', false);
                         $('#bsi-purge-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
+                });
+        });
+
+        // Очистка только картинок.
+        $('#bsi-purge-images').on('click', function(e) {
+                e.preventDefault();
+                var $btn = $(this);
+                $btn.prop('disabled', true);
+                $('#bsi-purge-images-status').html('<span class="bsi-spinner"></span> Удаление картинок...');
+
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_purge_images',
+                        nonce: bsiAdmin.nonce
+                }, function(response) {
+                        $btn.prop('disabled', false);
+                        if (response.success) {
+                                var d = response.data;
+                                var html = '<span style="color:#2e7d32;">✓ ' + d.message + '</span>';
+                                if (d.failed > 0) {
+                                        html += ' <span style="color:#c62828;">(ошибок: ' + d.failed + ')</span>';
+                                }
+                                if (d.total_found === 0) {
+                                        html = '<span style="color:#666;">Картинок BeeStore не найдено — удалять нечего.</span>';
+                                }
+                                $('#bsi-purge-images-status').html(html);
+                        } else {
+                                $('#bsi-purge-images-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
+                        }
+                }).fail(function() {
+                        $btn.prop('disabled', false);
+                        $('#bsi-purge-images-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
                 });
         });
 

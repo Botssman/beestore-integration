@@ -52,10 +52,10 @@ class BSI_GitHub_Updater {
                         return $transient;
                 }
 
-                // Не проверяем, если уже запущен процесс обновления этого плагина.
-                if ( isset( $transient->response[ $this->basename ] ) ) {
-                        return $transient;
-                }
+                // ВАЖНО: ранее тут был ранний return если $transient->response[ $this->basename ]
+                // уже существует. Это ломало автообновление: после обновления с 1.7.0 → 1.7.3
+                // WP кешировал response на 12 часов, и при появлении v1.7.4 плагин не
+                // перезаписывал кеш → обновление не появлялось. Убрали этот return.
 
                 $release = $this->get_latest_release();
                 if ( is_wp_error( $release ) || ! $release ) {

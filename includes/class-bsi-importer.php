@@ -870,12 +870,47 @@ class BSI_Importer {
                 // проход строит индекс IGUArticolo → количество, второй проход импортирует.
                 $models = array();   // IGUArticolo => [ parent_data, variations => [...] ]
                 $processed_count = 0;
+                $skipped_by_filter = 0;
+
+                // Сброс счётчиков фильтров (для лимитов) в начале импорта.
+                BSI_Import_Filters::instance()->reset_counters();
 
                 foreach ( $parser as $idx => $row ) {
                         $processed_count++;
                         if ( empty( $row['IGUArticolo'] ) ) {
                                 continue;
                         }
+
+                        // ─── Проверка фильтром ─────────────────────────────────────────
+                        // Извлекаем категорию и бренд по той же логике, что и в apply_categories.
+                        $category = '';
+                        if ( ! empty( $row['DSRepartoWeb'] ) ) {
+                                $category = $row['DSRepartoWeb'];
+                        } elseif ( ! empty( $row['DSReparto'] ) ) {
+                                $category = $row['DSReparto'];
+                        }
+                        if ( ! $category ) {
+                                if ( ! empty( $row['DSCategoriaMerceologicaWeb'] ) ) {
+                                        $category = $row['DSCategoriaMerceologicaWeb'];
+                                } elseif ( ! empty( $row['DSCategoriaMerceologica'] ) ) {
+                                        $category = $row['DSCategoriaMerceologica'];
+                                }
+                        }
+
+                        $brand = '';
+                        if ( ! empty( $row['DSLinea'] ) ) {
+                                $brand = $row['DSLinea'];
+                        } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
+                                $brand = $row['RaggruppamentoLinea'];
+                        }
+
+                        // Проверяем фильтром — если не проходит, пропускаем строку.
+                        if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand ) ) {
+                                $skipped_by_filter++;
+                                continue;
+                        }
+                        // ──────────────────────────────────────────────────────────────
+
                         $igu_articolo = $row['IGUArticolo'];
 
                         if ( ! isset( $models[ $igu_articolo ] ) ) {
@@ -897,6 +932,14 @@ class BSI_Importer {
                 // Финальный чанк.
                 if ( ! empty( $models ) ) {
                         $this->process_models_batch( $models );
+                }
+
+                // Логируем сколько отфильтровано.
+                if ( $skipped_by_filter > 0 ) {
+                        $this->log( 'info', 'Строк пропущено фильтром', array(
+                                'skipped' => $skipped_by_filter,
+                                'total'   => $processed_count,
+                        ) );
                 }
 
                 // Шаг 2: Если включено delete_out_of_stock — снять с публикации товары,

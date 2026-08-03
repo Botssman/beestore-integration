@@ -24,7 +24,8 @@ class BSI_GitHub_Updater {
 
         public function __construct() {
                 $this->plugin_file = BSI_PLUGIN_FILE;
-                $this->slug        = BSI_PLUGIN_BASENAME;
+                $this->slug        = dirname( BSI_PLUGIN_BASENAME ); // 'beestore-integration' (папка).
+                $this->basename    = BSI_PLUGIN_BASENAME;            // 'beestore-integration/beestore-integration.php'.
                 $this->version     = BSI_VERSION;
 
                 add_filter( 'pre_set_site_transient_update_plugins', array( $this, 'check_update' ) );
@@ -39,8 +40,18 @@ class BSI_GitHub_Updater {
                         return $transient;
                 }
 
+                // Не проверяем, если уже запущен процесс обновления этого плагина.
+                if ( isset( $transient->response[ $this->basename ] ) ) {
+                        return $transient;
+                }
+
                 $release = $this->get_latest_release();
                 if ( is_wp_error( $release ) || ! $release ) {
+                        if ( class_exists( 'BSI_Logger' ) ) {
+                                BSI_Logger::instance()->debug( 'updater', 'GitHub release не получен', array(
+                                        'err' => is_wp_error( $release ) ? $release->get_error_message() : 'empty',
+                                ) );
+                        }
                         return $transient;
                 }
 
@@ -49,19 +60,35 @@ class BSI_GitHub_Updater {
                 // Убираем 'v' префикс если есть.
                 $remote_version = ltrim( $remote_version, 'v' );
 
+                if ( class_exists( 'BSI_Logger' ) ) {
+                        BSI_Logger::instance()->debug( 'updater', 'Проверка версии плагина', array(
+                                'current' => $this->version,
+                                'remote'  => $remote_version,
+                                'tag'     => $release['tag_name'],
+                        ) );
+                }
+
                 if ( version_compare( $this->version, $remote_version, '<' ) ) {
                         $package_url = $this->get_zip_url( $release );
 
+                        if ( class_exists( 'BSI_Logger' ) ) {
+                                BSI_Logger::instance()->info( 'updater', 'Доступно обновление', array(
+                                        'current' => $this->version,
+                                        'remote'  => $remote_version,
+                                        'package' => $package_url,
+                                ) );
+                        }
+
                         $obj                          = new stdClass();
-                        $obj->slug                    = $this->slug;
-                        $obj->plugin                  = $this->slug;
+                        $obj->slug                    = $this->slug;       // 'beestore-integration'.
+                        $obj->plugin                  = $this->basename;   // 'beestore-integration/beestore-integration.php'.
                         $obj->new_version              = $remote_version;
                         $obj->package                 = $package_url;
                         $obj->url                     = 'https://github.com/' . $this->github_repo;
                         $obj->icons                   = array();
                         $obj->banners                 = array();
 
-                        $transient->response[ $this->slug ] = $obj;
+                        $transient->response[ $this->basename ] = $obj;
                 }
 
                 return $transient;
@@ -74,7 +101,7 @@ class BSI_GitHub_Updater {
                 if ( 'plugin_information' !== $action ) {
                         return $result;
                 }
-                if ( ! isset( $args->slug ) || $args->slug !== dirname( $this->slug ) ) {
+                if ( ! isset( $args->slug ) || $args->slug !== $this->slug ) {
                         return $result;
                 }
 

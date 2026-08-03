@@ -21,12 +21,24 @@ class BSI_GitHub_Updater {
         private $github_repo = 'Botssman/beestore-integration';
         private $api_url     = 'https://api.github.com/repos/Botssman/beestore-integration';
         private $raw_url     = 'https://raw.githubusercontent.com/Botssman/beestore-integration/main';
+        private $access_token = ''; // Опционально: для приватных репозиториев.
 
         public function __construct() {
                 $this->plugin_file = BSI_PLUGIN_FILE;
                 $this->slug        = dirname( BSI_PLUGIN_BASENAME ); // 'beestore-integration' (папка).
                 $this->basename    = BSI_PLUGIN_BASENAME;            // 'beestore-integration/beestore-integration.php'.
                 $this->version     = BSI_VERSION;
+
+                // Опционально: GitHub Personal Access Token для приватных репозиториев.
+                // Берётся из wp-config.php (define('BSI_GITHUB_TOKEN', 'xxx')) или из опции.
+                if ( defined( 'BSI_GITHUB_TOKEN' ) && BSI_GITHUB_TOKEN ) {
+                        $this->access_token = BSI_GITHUB_TOKEN;
+                } else {
+                        $settings = get_option( 'bsi_settings', array() );
+                        if ( ! empty( $settings['github_token'] ) ) {
+                                $this->access_token = $settings['github_token'];
+                        }
+                }
 
                 add_filter( 'pre_set_site_transient_update_plugins', array( $this, 'check_update' ) );
                 add_filter( 'plugins_api', array( $this, 'plugin_info' ), 20, 3 );
@@ -141,6 +153,20 @@ class BSI_GitHub_Updater {
         }
 
         /**
+         * Заголовки для GitHub API запросов.
+         * Если задан access_token — добавляем Authorization (для приватных репо).
+         */
+        private function get_api_headers() {
+                $headers = array(
+                        'Accept' => 'application/vnd.github.v3+json',
+                );
+                if ( $this->access_token ) {
+                        $headers['Authorization'] = 'token ' . $this->access_token;
+                }
+                return $headers;
+        }
+
+        /**
          * Получить последний release с GitHub.
          */
         private function get_latest_release() {
@@ -155,9 +181,7 @@ class BSI_GitHub_Updater {
                         array(
                                 'timeout'    => 15,
                                 'user-agent' => 'BeeStoreIntegration/' . BSI_VERSION,
-                                'headers'    => array(
-                                        'Accept' => 'application/vnd.github.v3+json',
-                                ),
+                                'headers'    => $this->get_api_headers(),
                         )
                 );
 
@@ -239,6 +263,7 @@ class BSI_GitHub_Updater {
                         array(
                                 'timeout'    => 15,
                                 'user-agent' => 'BeeStoreIntegration/' . BSI_VERSION,
+                                'headers'    => $this->get_api_headers(),
                         )
                 );
 

@@ -301,6 +301,26 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => sprintf( __( 'Импорт не запущен (статус: %s)', 'beestore-integration' ), $state['status'] ) ) );
                 }
 
+                // Проверяем lock — если cron или другой процесс уже импортирует,
+                // AJAX не запускает параллельный.
+                $lock = get_transient( 'bsi_import_lock' );
+                if ( false !== $lock ) {
+                        $lock_age = time() - (int) $lock;
+                        $lock_pid = (int) get_transient( 'bsi_import_lock_pid' );
+                        $current_pid = function_exists( 'getmypid' ) ? getmypid() : 0;
+                        // Если lock от другого PID и свежий — выходим.
+                        if ( $lock_pid !== $current_pid && $lock_age < 1800 ) {
+                                wp_send_json_error( array(
+                                        'message' => sprintf(
+                                            /* translators: 1: секунды, 2: PID процесса */
+                                            __( 'Импорт уже идёт в другом процессе (%1$d сек, PID %2$d). Подождите или сбросьте lock.', 'beestore-integration' ),
+                                            $lock_age,
+                                            $lock_pid
+                                        ),
+                                ) );
+                        }
+                }
+
                 if ( empty( $state['csv_file'] ) || ! file_exists( $state['csv_file'] ) ) {
                         $this->update_import_state( array(
                                 'status'     => 'error',
@@ -553,7 +573,18 @@ class BSI_Importer {
 
                 // Сбрасываем состояние.
                 delete_option( 'bsi_import_state' );
-                wp_send_json_success( array( 'message' => __( 'Импорт остановлен. Прогресс сброшен.', 'beestore-integration' ) ) );
+
+                // Сбрасываем lock импорта.
+                delete_transient( 'bsi_import_lock' );
+                delete_transient( 'bsi_import_lock_pid' );
+
+                // Помечаем cron как «нужно пропустить следующую итерацию»
+                // (на случай если cron уже запущен — он проверит этот флаг).
+                set_transient( 'bsi_import_stop_requested', time(), 600 );
+
+                wp_send_json_success( array(
+                        'message' => __( 'Импорт остановлен. Прогресс сброшен. Lock снят.', 'beestore-integration' ),
+                ) );
         }
 
         /* ---------------------------------------------------------------------
@@ -843,6 +874,23 @@ class BSI_Importer {
          * Точка входа для cron.
          * --------------------------------------------------------------------- */
         public function cron_import() {
+                // Проверяем lock — если идёт другой импорт (например ручной AJAX),
+                // cron не запускает параллельный.
+                $lock = get_transient( 'bsi_import_lock' );
+                if ( false !== $lock ) {
+                        $lock_age = time() - (int) $lock;
+                        if ( $lock_age < 1800 ) {
+                                $this->log( 'info', 'Cron: импорт уже идёт в другом процессе — пропускаем', array(
+                                        'lock_age_seconds' => $lock_age,
+                                ) );
+                                return;
+                        }
+                        // Старый зависший lock — сбрасываем.
+                        $this->log( 'warning', 'Cron: обнаружен зависший lock импорта — сбрасываем', array( 'lock_age' => $lock_age ) );
+                        delete_transient( 'bsi_import_lock' );
+                        delete_transient( 'bsi_import_lock_pid' );
+                }
+
                 $this->log( 'info', 'Запуск cron-импорта каталога' );
 
                 $result = BSI_FTP::instance()->fetch_latest_zip();
@@ -904,10 +952,50 @@ class BSI_Importer {
          * @return array Отчёт.
          * --------------------------------------------------------------------- */
         public function import_csv_file( $csv_file, $zip_file = '' ) {
+                // ─── ЗАЩИТА ОТ ПАРАЛЛЕЛЬНОГО ИМПОРТА ────────────────────────────────
+                // Если импорт уже идёт (другой процесс cron или AJAX) — выходим.
+                // Без этого два процесса могут одновременно создавать дубли товаров.
+                $lock = get_transient( 'bsi_import_lock' );
+                if ( false !== $lock ) {
+                        $lock_age = time() - (int) $lock;
+                        // Если лок больше 30 минут — считаем зависшим, сбрасываем.
+                        if ( $lock_age < 1800 ) {
+                                $this->log( 'warning', 'Импорт уже идёт в другом процессе — пропускаем', array(
+                                        'lock_age_seconds' => $lock_age,
+                                        'csv'              => basename( $csv_file ),
+                                ) );
+                                return array(
+                                        'success' => false,
+                                        'error'   => 'import_in_progress',
+                                        'message' => sprintf(
+                                            /* translators: %d — секунды */
+                                            __( 'Импорт уже идёт в другом процессе (%d сек назад начат). Пропускаем.', 'beestore-integration' ),
+                                            $lock_age
+                                        ),
+                                ) );
+                        }
+                        $this->log( 'warning', 'Старый lock импорта обнаружен — сбрасываем', array( 'lock_age' => $lock_age ) );
+                }
+                set_transient( 'bsi_import_lock', time(), 1800 ); // 30 минут максимум.
+
+                // Сохраняем PID для диагностики.
+                $lock_pid = function_exists( 'getmypid' ) ? getmypid() : 0;
+                set_transient( 'bsi_import_lock_pid', $lock_pid, 1800 );
+
+                // Регистрируем shutdown-функцию чтобы гарантированно освободить lock
+                // даже при fatal error или timeout.
+                register_shutdown_function( function () {
+                        delete_transient( 'bsi_import_lock' );
+                        delete_transient( 'bsi_import_lock_pid' );
+                } );
+                // ────────────────────────────────────────────────────────────────────
+
                 $start_time = microtime( true );
                 $parser     = BSI_CSV_Parser::instance()->open( $csv_file );
                 if ( is_wp_error( $parser ) ) {
                         $this->log( 'error', 'Не удалось открыть CSV', array( 'file' => $csv_file, 'err' => $parser->get_error_message() ) );
+                        delete_transient( 'bsi_import_lock' );
+                        delete_transient( 'bsi_import_lock_pid' );
                         return array( 'success' => false, 'error' => $parser->get_error_message() );
                 }
 
@@ -1018,6 +1106,10 @@ class BSI_Importer {
                 update_option( 'bsi_last_import_finished', current_time( 'mysql' ) );
 
                 $this->log( 'info', 'Импорт завершён', $report );
+
+                // Снимаем lock импорта.
+                delete_transient( 'bsi_import_lock' );
+                delete_transient( 'bsi_import_lock_pid' );
 
                 return $report;
         }

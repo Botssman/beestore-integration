@@ -45,6 +45,42 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
 <div class="wrap">
         <h1><?php echo esc_html__( 'BeeStore — Импорт каталога', 'beestore-integration' ); ?></h1>
 
+        <!-- Фоновый cron-импорт: статус и управление -->
+        <div class="bsi-card" id="bsi-cron-status-card" style="border-color:#2271b1;">
+                <h2 style="display:flex;align-items:center;gap:8px;">
+                        <span class="dashicons dashicons-clock"></span>
+                        <?php esc_html_e( 'Фоновый импорт (Cron)', 'beestore-integration' ); ?>
+                        <span id="bsi-cron-badge" style="background:#666;color:#fff;padding:3px 10px;border-radius:3px;font-size:12px;font-weight:600;">
+                                <?php esc_html_e( 'загрузка...', 'beestore-integration' ); ?>
+                        </span>
+                </h2>
+                <div id="bsi-cron-info" style="display:flex;gap:30px;flex-wrap:wrap;margin:10px 0;">
+                        <div>
+                                <strong><?php esc_html_e( 'Статус:', 'beestore-integration' ); ?></strong>
+                                <span id="bsi-cron-running">—</span>
+                        </div>
+                        <div>
+                                <strong><?php esc_html_e( 'Следующий запуск:', 'beestore-integration' ); ?></strong>
+                                <span id="bsi-cron-next">—</span>
+                        </div>
+                        <div>
+                                <strong><?php esc_html_e( 'Последний импорт:', 'beestore-integration' ); ?></strong>
+                                <span id="bsi-cron-last">—</span>
+                        </div>
+                </div>
+                <p>
+                        <button type="button" class="button button-secondary" id="bsi-stop-cron-import"
+                                onclick="return confirm('<?php esc_attr_e( 'Остановить фоновый импорт? Cron возобновит работу по расписанию.', 'beestore-integration' ); ?>')">
+                                <span class="dashicons dashicons-controls-pause"></span>
+                                <?php esc_html_e( 'Остановить фоновый импорт', 'beestore-integration' ); ?>
+                        </button>
+                        <span id="bsi-cron-stop-status" style="margin-left:10px;"></span>
+                </p>
+                <p class="description">
+                        <?php esc_html_e( 'Cron автоматически запускает импорт по расписанию (раз в час). Кнопка выше останавливает текущий процесс, но не отключает cron — при следующем срабатывании импорт запустится снова.', 'beestore-integration' ); ?>
+                </p>
+        </div>
+
         <!-- Карточка: текущий статус импорта -->
         <div class="bsi-card" id="bsi-import-status-card">
                 <h2>
@@ -654,5 +690,76 @@ jQuery(document).ready(function($){
 
         // Инициализация при загрузке страницы.
         initUI();
+
+        // ─── Фоновый cron-импорт: статус и управление ─────────────────
+        function updateCronStatus() {
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_cron_import_status',
+                        nonce: bsiAdmin.nonce
+                }, function(response) {
+                        if (!response.success) return;
+                        var d = response.data;
+                        var $badge = $('#bsi-cron-badge');
+                        var $running = $('#bsi-cron-running');
+                        var $next = $('#bsi-cron-next');
+                        var $last = $('#bsi-cron-last');
+
+                        if (d.is_running) {
+                                $badge.text('▶ Идёт импорт').css('background', '#2271b1');
+                                $running.html('<span style="color:#2271b1;font-weight:600;">▶ Идёт (' + d.lock_age + ' сек, PID ' + d.lock_pid + ')</span>');
+                        } else if (d.stop_pending) {
+                                $badge.text('⏸ Пауза').css('background', '#f57c00');
+                                $running.html('<span style="color:#f57c00;font-weight:600;">⏸ Остановлен (cron возобновит)</span>');
+                        } else {
+                                $badge.text('✓ Ожидание').css('background', '#2e7d32');
+                                $running.html('<span style="color:#2e7d32;">Ожидание расписания</span>');
+                        }
+
+                        if (d.next_cron) {
+                                $next.html(d.next_cron + ' <small style="color:#666;">(через ' + d.next_cron_in + ')</small>');
+                        } else {
+                                $next.html('<span style="color:#c62828;">не запланирован</span>');
+                        }
+
+                        if (d.last_import) {
+                                $last.html(d.last_import + (d.last_zip ? ' <small style="color:#666;">(' + d.last_zip + ')</small>' : ''));
+                        } else {
+                                $last.html('—');
+                        }
+                });
+        }
+
+        // Обновляем статус при загрузке.
+        updateCronStatus();
+        // И каждые 15 секунд.
+        setInterval(updateCronStatus, 15000);
+
+        // Кнопка "Остановить фоновый импорт".
+        $('#bsi-stop-cron-import').on('click', function(e) {
+                e.preventDefault();
+                var $btn = $(this);
+                var $status = $('#bsi-cron-stop-status');
+                $btn.prop('disabled', true);
+                $status.html('<span class="spinner is-active" style="float:none;vertical-align:middle;"></span> Остановка...');
+
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_stop_cron_import',
+                        nonce: bsiAdmin.nonce
+                }, function(response) {
+                        $btn.prop('disabled', false);
+                        if (response.success) {
+                                $status.html('<span style="color:#2e7d32;">✓ ' + response.data.message + '</span>');
+                                if (response.data.next_cron) {
+                                        $status.append('<br><small style="color:#666;">Следующий запуск: ' + response.data.next_cron + '</small>');
+                                }
+                                updateCronStatus();
+                        } else {
+                                $status.html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
+                        }
+                }).fail(function() {
+                        $btn.prop('disabled', false);
+                        $status.html('<span style="color:#c62828;">✗ AJAX error</span>');
+                });
+        });
 });
 </script>

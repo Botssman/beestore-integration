@@ -55,6 +55,12 @@ class BSI_Importer {
                 // AJAX: удалить только картинки, импортированные плагином.
                 add_action( 'wp_ajax_bsi_purge_images', array( $this, 'ajax_purge_images' ) );
 
+                // AJAX: остановить фоновый cron-импорт (сброс lock).
+                add_action( 'wp_ajax_bsi_stop_cron_import', array( $this, 'ajax_stop_cron_import' ) );
+
+                // AJAX: получить статус фонового импорта (для индикатора).
+                add_action( 'wp_ajax_bsi_cron_import_status', array( $this, 'ajax_cron_import_status' ) );
+
                 // AJAX: скачать CSV с FTP для настройки фильтров (без запуска импорта).
                 add_action( 'wp_ajax_bsi_download_csv_for_filters', array( $this, 'ajax_download_csv_for_filters' ) );
 
@@ -583,7 +589,81 @@ class BSI_Importer {
                 set_transient( 'bsi_import_stop_requested', time(), 600 );
 
                 wp_send_json_success( array(
-                        'message' => __( 'Импорт остановлен. Прогресс сброшен. Lock снят.', 'beestore-integration' ),
+                        'message' => __( 'Импорт остановлен. Прогресс сброшен. Lock снят. Cron продолжит работу по расписанию.', 'beestore-integration' ),
+                ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: остановить фоновый cron-импорт (не сбрасывая прогресс AJAX).
+         * Сбрасывает только lock — при следующем срабатывании cron
+         * импорт запустится автоматически.
+         * --------------------------------------------------------------------- */
+        public function ajax_stop_cron_import() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                // Сбрасываем lock импорта — текущий фоновый процесс продолжит
+                // работать до конца батча, но потом остановится.
+                delete_transient( 'bsi_import_lock' );
+                delete_transient( 'bsi_import_lock_pid' );
+
+                // Помечаем — следующий cron должен пропустить (10 минут пауза).
+                set_transient( 'bsi_import_stop_requested', time(), 600 );
+
+                // Когда следующий раз запланирован cron.
+                $next_cron = wp_next_scheduled( 'bsi_cron_import_catalog' );
+                $next_cron_str = $next_cron
+                        ? date_i18n( 'd.m.Y H:i', $next_cron + ( get_option( 'gmt_offset' ) * HOUR_IN_SECONDS ) )
+                        : __( 'не запланирован', 'beestore-integration' );
+
+                wp_send_json_success( array(
+                        'message'    => __( 'Фоновый импорт остановлен. Cron возобновит работу по расписанию.', 'beestore-integration' ),
+                        'next_cron'  => $next_cron_str,
+                ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: получить статус фонового импорта (для индикатора).
+         * --------------------------------------------------------------------- */
+        public function ajax_cron_import_status() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $lock      = get_transient( 'bsi_import_lock' );
+                $lock_pid  = get_transient( 'bsi_import_lock_pid' );
+                $stop_flag = get_transient( 'bsi_import_stop_requested' );
+
+                $next_cron = wp_next_scheduled( 'bsi_cron_import_catalog' );
+                $last_import = get_option( 'bsi_last_import_finished', '' );
+                $last_zip = get_option( 'bsi_last_import_zip', '' );
+
+                $is_running = false;
+                $lock_age   = 0;
+
+                if ( false !== $lock ) {
+                        $lock_age = time() - (int) $lock;
+                        if ( $lock_age < 1800 ) {
+                                $is_running = true;
+                        }
+                }
+
+                wp_send_json_success( array(
+                        'is_running'   => $is_running,
+                        'lock_age'     => $lock_age,
+                        'lock_pid'     => $lock_pid ? (int) $lock_pid : 0,
+                        'stop_pending' => false !== $stop_flag,
+                        'next_cron'    => $next_cron
+                                ? date_i18n( 'd.m.Y H:i', $next_cron + ( get_option( 'gmt_offset' ) * HOUR_IN_SECONDS ) )
+                                : '',
+                        'next_cron_in' => $next_cron
+                                ? human_time_diff( $next_cron, current_time( 'timestamp' ) )
+                                : '',
+                        'last_import'  => $last_import,
+                        'last_zip'     => $last_zip,
                 ) );
         }
 

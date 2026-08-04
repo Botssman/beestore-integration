@@ -1682,14 +1682,20 @@ class BSI_Importer {
                         return $term_id;
                 }
 
-                $result = wp_insert_term( $name, $taxonomy );
+                // Создаём с кастомным slug (сохраняет "+", "." и т.д.).
+                $custom_slug = $this->make_attribute_slug( $name );
+                $result = wp_insert_term( $name, $taxonomy, array( 'slug' => $custom_slug ) );
                 if ( is_wp_error( $result ) ) {
-                        $this->log( 'warning', 'Не удалось создать терм', array(
-                                'name'     => $name,
-                                'taxonomy' => $taxonomy,
-                                'error'    => $result->get_error_message(),
-                        ) );
-                        return 0;
+                        // Возможно slug занят — пробуем без явного slug.
+                        $result = wp_insert_term( $name, $taxonomy );
+                        if ( is_wp_error( $result ) ) {
+                                $this->log( 'warning', 'Не удалось создать терм', array(
+                                        'name'     => $name,
+                                        'taxonomy' => $taxonomy,
+                                        'error'    => $result->get_error_message(),
+                                ) );
+                                return 0;
+                        }
                 }
 
                 $term_id = (int) $result['term_id'];
@@ -1763,19 +1769,48 @@ class BSI_Importer {
                         return $term ? $term->slug : '';
                 }
 
-                // Создаём новый терм.
-                $result = wp_insert_term( $name, $taxonomy );
+                // Создаём новый терм с КАСТОМНЫМ slug (сохраняет "+", "." и т.д.).
+                // Без этого WordPress sanitize_title() срежет "+" → "7+" станет slug "7".
+                $custom_slug = $this->make_attribute_slug( $name );
+                $result = wp_insert_term( $name, $taxonomy, array( 'slug' => $custom_slug ) );
                 if ( is_wp_error( $result ) ) {
-                        $this->log( 'warning', 'Не удалось создать терм атрибута', array(
-                                'name'     => $name,
-                                'taxonomy' => $taxonomy,
-                                'error'    => $result->get_error_message(),
-                        ) );
-                        return '';
+                        // Возможно slug уже занят — пробуем без явного slug.
+                        $result = wp_insert_term( $name, $taxonomy );
+                        if ( is_wp_error( $result ) ) {
+                                $this->log( 'warning', 'Не удалось создать терм атрибута', array(
+                                        'name'     => $name,
+                                        'taxonomy' => $taxonomy,
+                                        'slug'     => $custom_slug,
+                                        'error'    => $result->get_error_message(),
+                                ) );
+                                return '';
+                        }
                 }
 
                 $term = get_term( $result['term_id'], $taxonomy );
                 return $term ? $term->slug : '';
+        }
+
+        /**
+         * Создать slug для атрибута, сохраняющий специальные символы.
+         *
+         * WordPress sanitize_title() срезает "+" → "7+" становится "7".
+         * Это вызывает коллизии: "7+" и "7" получают одинаковый slug.
+         *
+         * Решение: конвертируем "+" в "-plus", "." в "-point", пробелы в "-".
+         *
+         * @param string $name
+         * @return string
+         */
+        private function make_attribute_slug( $name ) {
+                $slug = strtolower( trim( $name ) );
+                $slug = str_replace( array( '+', ' plus', 'plus ' ), '-plus', $slug );
+                $slug = str_replace( '.', '-point', $slug );
+                $slug = str_replace( '/', '-', $slug );
+                $slug = preg_replace( '/[^a-z0-9\-]/', '', $slug );
+                $slug = preg_replace( '/-+/', '-', $slug );
+                $slug = trim( $slug, '-' );
+                return $slug ?: sanitize_title( $name );
         }
 
         /**

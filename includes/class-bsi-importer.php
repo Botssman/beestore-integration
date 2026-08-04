@@ -523,31 +523,26 @@ class BSI_Importer {
                                 ) );
                         }
 
-                        // ─── КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ ─────────────────────────────────
-                        // Обновляем state ПОСЛЕ КАЖДОЙ модели, а не после всего батча.
-                        // Сохраняем file_position для мгновенного fseek при следующем батче.
-                        $this->update_import_state( array(
-                                'processed_rows'  => $state['processed_rows'] + count( $data['variants'] ),
-                                'last_offset'     => $state['last_offset'] + count( $data['variants'] ),
-                                'file_position'   => $new_file_pos,
-                                'elapsed_seconds' => $state['elapsed_seconds'] + ( microtime( true ) - $start_time ),
-                                'errors_count'    => $state['errors_count'] + $errors,
-                                'last_error'      => $last_error ?: $state['last_error'],
-                                'created_products' => $state['created_products'] + $created,
-                                'updated_products' => $state['updated_products'] + $updated,
-                        ) );
+                        // Обновляем счётчики (без file_position — его сохраним в конце батча).
                         $state['last_offset'] += count( $data['variants'] );
                         $state['processed_rows'] += count( $data['variants'] );
                         $state['created_products'] += $created;
                         $state['updated_products'] += $updated;
                         $state['errors_count'] += $errors;
-                        // Сбрасываем локальные счётчики (уже записали в state).
                         $created = 0;
                         $updated = 0;
                         $errors = 0;
                         $last_error = '';
-                        // ─────────────────────────────────────────────────────────────
                 }
+
+                // Сохраняем file_position ТОЛЬКО в конце батча.
+                // Не после каждой модели — потому что $new_file_pos указывает на КОНЕЦ
+                // всего батча, а не на позицию после текущей модели. Если сохранить
+                // его после первой модели и PHP таймаутит — следующая итерация
+                // сикипает все остальные модели.
+                // Вместо этого: если PHP таймаутит mid-batch, следующий вызов
+                // перечитает тот же батч. Дубликатов не будет, потому что
+                // find_variation_by_meta (SQL) найдёт уже созданные вариации.
 
                 $elapsed_batch = microtime( true ) - $start_time;
 

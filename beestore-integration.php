@@ -3,7 +3,7 @@
  * Plugin Name:       BeeStore Integration for WooCommerce
  * Plugin URI:        https://github.com/Botssman/beestore-integration
  * Description:       Интеграция WooCommerce с BeeStore (Sirio Informatica): импорт каталога из CSV-выгрузки FTP, синхронизация остатков, передача заказов через SOAP (fInserimentoPrenotazione), обратная синхронизация статусов и tracking number, отмена/доплата заказа, конвертация цен и картинок в WebP, гибкие фильтры импорта по категориям и брендам.
- * Version:           1.7.19
+ * Version:           1.7.20
  * Author:            Kirill Andreev
  * License:           GPL-2.0+
  * Text Domain:       beestore-integration
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /* -------------------------------------------------------------------------
  * Константы плагина
  * ------------------------------------------------------------------------- */
-define( 'BSI_VERSION', '1.7.19' );
+define( 'BSI_VERSION', '1.7.20' );
 define( 'BSI_PLUGIN_FILE', __FILE__ );
 define( 'BSI_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'BSI_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -54,6 +54,12 @@ spl_autoload_register(
 register_activation_hook(
         __FILE__,
         function () {
+                // Подавляем deprecation notices при активации — WordPress
+                // деактивирует плагин если видит any output (даже notice).
+                // На PHP 8.x Iterator/Countable методы без #[\ReturnTypeWillChange]
+                // генерируют deprecation notices.
+                $old_error_reporting = error_reporting( E_ERROR | E_PARSE );
+
                 if ( ! class_exists( 'WooCommerce' ) ) {
                         deactivate_plugins( BSI_PLUGIN_BASENAME );
                         wp_die( esc_html__( 'Для работы плагина BeeStore Integration требуется установленный и активированный WooCommerce.', 'beestore-integration' ) );
@@ -63,6 +69,9 @@ register_activation_hook(
                         wp_die( esc_html__( 'Для работы плагина BeeStore Integration требуется расширение PHP SOAP. Обратитесь к хостинг-провайдеру для его включения.', 'beestore-integration' ) );
                 }
                 BSI_Installer::activate();
+
+                // Возвращаем прежний уровень ошибок.
+                error_reporting( $old_error_reporting );
         }
 );
 

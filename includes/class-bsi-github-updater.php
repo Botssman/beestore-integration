@@ -42,6 +42,127 @@ class BSI_GitHub_Updater {
 
                 add_filter( 'pre_set_site_transient_update_plugins', array( $this, 'check_update' ) );
                 add_filter( 'plugins_api', array( $this, 'plugin_info' ), 20, 3 );
+
+                // AJAX: принудительная проверка обновления (для кнопки в админке).
+                add_action( 'wp_ajax_bsi_check_github_update', array( $this, 'ajax_check_update' ) );
+        }
+
+        /**
+         * AJAX: Принудительно проверить обновление через GitHub API.
+         * Минуем кеш transient и кеш WP — напрямую дёргаем GitHub.
+         * Очищаем transient update_plugins и заполняем заново.
+         */
+        public function ajax_check_update() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                // Очищаем кеш transient'ов.
+                delete_transient( 'bsi_github_latest_release' );
+                delete_transient( 'bsi_github_readme' );
+                delete_site_transient( 'update_plugins' );
+
+                // Принудительно дёргаем GitHub API.
+                $release = $this->get_latest_release();
+
+                if ( is_wp_error( $release ) ) {
+                        wp_send_json_error( array(
+                                'message' => sprintf(
+                                    /* translators: %s — сообщение об ошибке */
+                                    __( 'Ошибка GitHub API: %s', 'beestore-integration' ),
+                                    $release->get_error_message()
+                                ),
+                                'error_code' => $release->get_error_code(),
+                        ) );
+                }
+
+                if ( ! $release || empty( $release['tag_name'] ) ) {
+                        wp_send_json_error( array(
+                                'message' => __( 'GitHub вернул пустой ответ. Проверьте internet-соединение сервера.', 'beestore-integration' ),
+                        ) );
+                }
+
+                $remote_version = ltrim( $release['tag_name'], 'v' );
+                $has_update     = version_compare( $this->version, $remote_version, '<' );
+
+                // Если обновление есть — заполняем transient update_plugins вручную,
+                // чтобы WP сразу показал уведомление.
+                if ( $has_update ) {
+                        $package_url = $this->get_zip_url( $release );
+
+                        $obj                          = new stdClass();
+                        $obj->slug                    = $this->slug;
+                        $obj->plugin                  = $this->basename;
+                        $obj->new_version              = $remote_version;
+                        $obj->package                 = $package_url;
+                        $obj->url                     = 'https://github.com/' . $this->github_repo;
+                        $obj->icons                   = array();
+                        $obj->banners                 = array();
+
+                        // Получаем текущий transient (пустой после delete_site_transient).
+                        $transient = get_site_transient( 'update_plugins' );
+                        if ( ! is_object( $transient ) ) {
+                                $transient = new stdClass();
+                                $transient->checked = array( $this->basename => $this->version );
+                                $transient->response = array();
+                                $transient->last_checked = time();
+                                $transient->translations = array();
+                        }
+                        $transient->response[ $this->basename ] = $obj;
+                        set_site_transient( 'update_plugins', $transient );
+
+                        // Логируем.
+                        if ( class_exists( 'BSI_Logger' ) ) {
+                                BSI_Logger::instance()->info( 'updater', 'Принудительная проверка: обновление доступно', array(
+                                        'current' => $this->version,
+                                        'remote'  => $remote_version,
+                                        'package' => $package_url,
+                                ) );
+                        }
+                } else {
+                        // Обновления нет — логируем.
+                        if ( class_exists( 'BSI_Logger' ) ) {
+                                BSI_Logger::instance()->info( 'updater', 'Принудительная проверка: обновлений нет', array(
+                                        'current' => $this->version,
+                                        'remote'  => $remote_version,
+                                ) );
+                        }
+                }
+
+                // Проверка ограничений WordPress.
+                $warnings = array();
+                if ( defined( 'DISALLOW_FILE_MODS' ) && DISALLOW_FILE_MODS ) {
+                        $warnings[] = __( 'В wp-config.php задано DISALLOW_FILE_MODS = true. WordPress запрещает любые изменения файлов через админку. Уведомление может не появиться.', 'beestore-integration' );
+                }
+                if ( defined( 'AUTOMATIC_UPDATER_DISABLED' ) && AUTOMATIC_UPDATER_DISABLED ) {
+                        $warnings[] = __( 'В wp-config.php задано AUTOMATIC_UPDATER_DISABLED = true. Автообновления отключены.', 'beestore-integration' );
+                }
+                if ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON ) {
+                        $warnings[] = __( 'В wp-config.php задано DISABLE_WP_CRON = true. WP-Cron отключён — нужна системная задача crontab.', 'beestore-integration' );
+                }
+
+                wp_send_json_success( array(
+                        'current_version' => $this->version,
+                        'remote_version'  => $remote_version,
+                        'tag_name'        => $release['tag_name'],
+                        'has_update'      => $has_update,
+                        'package_url'     => $has_update ? $this->get_zip_url( $release ) : '',
+                        'published_at'    => $release['published_at'] ?? '',
+                        'warnings'        => $warnings,
+                        'message'         => $has_update
+                                ? sprintf(
+                                    /* translators: 1: текущая версия, 2: новая версия */
+                                    __( 'Доступно обновление: %1$s → %2$s. Зайдите в Консоль → Обновления чтобы установить.', 'beestore-integration' ),
+                                    $this->version,
+                                    $remote_version
+                                )
+                                : sprintf(
+                                    /* translators: %s — текущая версия */
+                                    __( 'Установлена последняя версия (%s).', 'beestore-integration' ),
+                                    $this->version
+                                ),
+                ) );
         }
 
         /**

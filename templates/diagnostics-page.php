@@ -74,6 +74,26 @@ if ( ! defined( 'ABSPATH' ) ) {
                 </table>
         </div>
 
+        <!-- Проверка обновлений GitHub -->
+        <div class="bsi-card">
+                <h2><?php esc_html_e( 'Проверка обновлений плагина (GitHub)', 'beestore-integration' ); ?></h2>
+                <p>
+                        <?php esc_html_e( 'Принудительно проверить наличие новой версии на GitHub. Кнопка очищает кеш WordPress и напрямую вызывает GitHub API.', 'beestore-integration' ); ?>
+                </p>
+                <p>
+                        <strong><?php esc_html_e( 'Текущая версия:', 'beestore-integration' ); ?></strong>
+                        <code><?php echo esc_html( BSI_VERSION ); ?></code>
+                </p>
+                <p>
+                        <button type="button" class="button button-primary" id="bsi-check-github-update">
+                                <span class="dashicons dashicons-update"></span>
+                                <?php esc_html_e( 'Проверить обновления GitHub', 'beestore-integration' ); ?>
+                        </button>
+                        <span id="bsi-github-update-status" style="margin-left:15px;"></span>
+                </p>
+                <div id="bsi-github-update-result" style="display:none;margin-top:15px;"></div>
+        </div>
+
         <div class="bsi-card">
                 <h2><?php esc_html_e( 'Тест SOAP-подключения', 'beestore-integration' ); ?></h2>
                 <p>
@@ -184,3 +204,58 @@ if ( ! defined( 'ABSPATH' ) ) {
                 </p>
         </div>
 </div>
+
+<script>
+jQuery(document).ready(function($){
+        $('#bsi-check-github-update').on('click', function(){
+                var $btn = $(this);
+                var $status = $('#bsi-github-update-status');
+                var $result = $('#bsi-github-update-result');
+                $btn.prop('disabled', true);
+                $status.html('<span class="spinner is-active" style="float:none;vertical-align:middle;"></span> Проверка...');
+                $result.hide().empty();
+
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_check_github_update',
+                        nonce: bsiAdmin.nonce
+                }, function(response){
+                        $btn.prop('disabled', false);
+                        if (response.success) {
+                                var d = response.data;
+                                $status.html('<span style="color:#2e7d32;">✓ Проверка выполнена</span>');
+
+                                var html = '<div style="background:' + (d.has_update ? '#e7f5ed' : '#f0f0f1') + ';border:1px solid ' + (d.has_update ? '#46b450' : '#ccc') + ';border-radius:4px;padding:15px;">';
+                                html += '<h3 style="margin-top:0;">' + (d.has_update ? '🔄 Доступно обновление' : '✓ Установлена последняя версия') + '</h3>';
+                                html += '<p><strong>Текущая версия:</strong> <code>' + d.current_version + '</code></p>';
+                                if (d.has_update) {
+                                        html += '<p><strong>Новая версия:</strong> <code>' + d.remote_version + '</code></p>';
+                                        html += '<p><strong>Tag:</strong> <code>' + d.tag_name + '</code></p>';
+                                        html += '<p><strong>Опубликован:</strong> ' + d.published_at + '</p>';
+                                        html += '<p><strong>ZIP:</strong> <a href="' + d.package_url + '" target="_blank">' + d.package_url + '</a></p>';
+                                        html += '<p style="margin-top:15px;font-size:14px;">' + d.message + '</p>';
+                                        html += '<p style="margin-top:15px;"><a href="' + (window.location.origin + window.location.pathname.replace(/\/wp-admin\/.*$/, '/wp-admin/update-core.php')) + '" class="button button-primary">Перейти к обновлению →</a></p>';
+                                } else {
+                                        html += '<p style="margin-top:10px;">' + d.message + '</p>';
+                                }
+                                if (d.warnings && d.warnings.length > 0) {
+                                        html += '<div style="margin-top:15px;background:#fff8e5;border:1px solid #ffb900;padding:10px 14px;border-radius:3px;">';
+                                        html += '<strong>⚠ Предупреждения:</strong><ul style="margin-top:8px;">';
+                                        for (var i = 0; i < d.warnings.length; i++) {
+                                                html += '<li>' + d.warnings[i] + '</li>';
+                                        }
+                                        html += '</ul></div>';
+                                }
+                                html += '</div>';
+                                $result.html(html).show();
+                        } else {
+                                $status.html('<span style="color:#c62828;">✗ Ошибка</span>');
+                                $result.html('<div style="background:#fbeaea;border:1px solid #c62828;padding:15px;border-radius:4px;"><strong>Ошибка:</strong> ' + (response.data.message || 'Неизвестная ошибка') + '</div>').show();
+                        }
+                }).fail(function(){
+                        $btn.prop('disabled', false);
+                        $status.html('<span style="color:#c62828;">✗ AJAX error</span>');
+                        $result.html('<div style="background:#fbeaea;border:1px solid #c62828;padding:15px;border-radius:4px;">AJAX error — проверьте консоль браузера.</div>').show();
+                });
+        });
+});
+</script>

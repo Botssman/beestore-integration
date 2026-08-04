@@ -1751,17 +1751,42 @@ class BSI_Importer {
                 $cod_articolo = isset( $row['CodArticolo'] ) ? $row['CodArticolo'] : '';
                 $variation_id = $cod_articolo ? $this->find_variation_by_meta( '_bsi_cod_articolo', $cod_articolo, $product_id ) : 0;
 
-                // Если по meta не нашли — пробуем найти по SKU (вариация могла быть
-                // импортирована старой версией плагина без meta _bsi_cod_articolo).
+                // Если по meta не нашли — ищем по SKU через прямой SQL-запрос.
+                // Ищем ВСЕ вариации с этим SKU у данного parent_id, не только первую,
+                // потому что в базе могут быть дубликаты от прошлых импортов.
                 if ( ! $variation_id && $cod_articolo ) {
-                        $existing_by_sku = wc_get_product_id_by_sku( $cod_articolo );
-                        if ( $existing_by_sku ) {
-                                $existing_product = wc_get_product( $existing_by_sku );
-                                // Убеждаемся, что это вариация того же родителя.
-                                if ( $existing_product instanceof WC_Product_Variation
-                                        && $existing_product->get_parent_id() == $product_id ) {
-                                        $variation_id = $existing_by_sku;
-                                        $this->log( 'info', 'Вариация найдена по SKU (а не по meta)', array(
+                        global $wpdb;
+                        $dupe_ids = $wpdb->get_col( $wpdb->prepare(
+                                "SELECT p.ID FROM {$wpdb->posts} p
+                                 INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID
+                                  AND pm.meta_key = '_sku' AND pm.meta_value = %s
+                                 WHERE p.post_type = 'product_variation'
+                                   AND p.post_parent = %d
+                                   AND p.post_status != 'trash'
+                                 ORDER BY p.ID ASC",
+                                $cod_articolo,
+                                $product_id
+                        ) );
+
+                        if ( ! empty( $dupe_ids ) ) {
+                                // Берём первую (самую старую) как основную.
+                                $variation_id = (int) $dupe_ids[0];
+
+                                // Если нашли больше одной — удаляем дубликаты.
+                                if ( count( $dupe_ids ) > 1 ) {
+                                        $duplicates_to_delete = array_slice( $dupe_ids, 1 );
+                                        $this->log( 'warning', 'Найдены дубликаты вариаций — удаляем', array(
+                                                'sku'             => $cod_articolo,
+                                                'parent_id'       => $product_id,
+                                                'kept_id'         => $variation_id,
+                                                'duplicate_ids'   => $duplicates_to_delete,
+                                                'total_found'     => count( $dupe_ids ),
+                                        ) );
+                                        foreach ( $duplicates_to_delete as $dup_id ) {
+                                                wp_delete_post( (int) $dup_id, true );
+                                        }
+                                } else {
+                                        $this->log( 'info', 'Вариация найдена по SKU (SQL)', array(
                                                 'sku'           => $cod_articolo,
                                                 'variation_id'  => $variation_id,
                                                 'parent_id'     => $product_id,

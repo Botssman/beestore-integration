@@ -2628,16 +2628,25 @@ class BSI_Importer {
         }
 
         private function find_variation_by_meta( $key, $value, $parent_id ) {
-                $posts = get_posts( array(
-                        'post_type'      => 'product_variation',
-                        'post_parent'    => $parent_id,
-                        'posts_per_page' => 1,
-                        'post_status'    => 'any',
-                        'meta_key'       => $key, // phpcs:ignore
-                        'meta_value'     => $value, // phpcs:ignore
-                        'fields'         => 'ids',
+                // Используем ПРЯМОЙ SQL вместо get_posts() — потому что WordPress
+                // кеширует результаты WP_Query, и после создания новой вариации
+                // через $variation->save() кеш не сбрасывается. В результате
+                // find_variation_by_meta возвращает пустой результат из кеша
+                // и плагин создаёт ДУБЛИКАТ вариации.
+                global $wpdb;
+                $found = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT p.ID FROM {$wpdb->posts} p
+                         INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID
+                            AND pm.meta_key = %s AND pm.meta_value = %s
+                         WHERE p.post_type = 'product_variation'
+                           AND p.post_parent = %d
+                           AND p.post_status != 'trash'
+                         LIMIT 1",
+                        $key,
+                        $value,
+                        $parent_id
                 ) );
-                return ! empty( $posts ) ? (int) $posts[0] : 0;
+                return $found ? (int) $found : 0;
         }
 
         /* ---------------------------------------------------------------------

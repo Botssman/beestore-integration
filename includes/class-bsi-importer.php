@@ -335,34 +335,63 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => 'CSV файл не найден' ) );
                 }
 
-                // Открываем CSV, пропускаем заголовок и уже обработанные строки.
-                $parser = BSI_CSV_Parser::instance()->open( $state['csv_file'] );
-                if ( is_wp_error( $parser ) ) {
+                // Открываем CSV напрямую через fopen для fseek (мгновенный переход).
+                // Раньше использовали BSI_CSV_Parser который читает файл с НАЧАЛА
+                // и пропускает строки по счётчику → O(n²) → прогрессивное замедление.
+                $handle = fopen( $state['csv_file'], 'rb' );
+                if ( ! $handle ) {
                         $this->update_import_state( array(
                                 'status'     => 'error',
-                                'last_error' => $parser->get_error_message(),
+                                'last_error' => 'Не удалось открыть CSV: ' . $state['csv_file'],
                         ) );
-                        wp_send_json_error( array( 'message' => $parser->get_error_message() ) );
+                        wp_send_json_error( array( 'message' => 'Не удалось открыть CSV' ) );
                 }
 
-                // Пропускаем уже обработанные строки.
-                $skip = (int) $state['last_offset'];
-                $current_index = 0;
+                // Пропускаем BOM.
+                $bom = fread( $handle, 3 );
+                if ( "\xEF\xBB\xBF" !== $bom ) {
+                        fseek( $handle, 0 );
+                }
+
+                // Читаем заголовок (первая строка).
+                $headers = fgetcsv( $handle, 0, ',', '"' );
+                if ( ! $headers ) {
+                        fclose( $handle );
+                        wp_send_json_error( array( 'message' => 'Не удалось прочитать заголовок CSV' ) );
+                }
+                $headers = array_map( 'trim', $headers );
+
+                // Если есть сохранённая позиция в файле — мгновенный переход.
+                $file_pos = isset( $state['file_position'] ) ? (int) $state['file_position'] : 0;
+                if ( $file_pos > 0 ) {
+                        fseek( $handle, $file_pos );
+                }
+
                 $batch_size = (int) $state['batch_size'];
                 $batch_rows = array();
                 $start_time = microtime( true );
 
-                foreach ( $parser as $idx => $row ) {
-                        $current_index++;
-                        if ( $current_index <= $skip ) {
-                                continue;
+                // Читаем батч напрямую — без пропуска строк!
+                while ( ! feof( $handle ) ) {
+                        $raw_row = fgetcsv( $handle, 0, ',', '"' );
+                        if ( false === $raw_row || null === $raw_row ) {
+                                break;
                         }
-                        $batch_rows[] = $row;
+                        if ( count( $raw_row ) < count( $headers ) ) {
+                                $raw_row = array_pad( $raw_row, count( $headers ), '' );
+                        }
+                        if ( count( $raw_row ) > count( $headers ) ) {
+                                $raw_row = array_slice( $raw_row, 0, count( $headers ) );
+                        }
+                        $batch_rows[] = array_combine( $headers, array_map( 'trim', $raw_row ) );
                         if ( count( $batch_rows ) >= $batch_size ) {
                                 break;
                         }
                 }
-                $parser->close();
+
+                // Сохраняем позицию файла для следующего батча.
+                $new_file_pos = ftell( $handle );
+                fclose( $handle );
 
                 if ( empty( $batch_rows ) ) {
                         // Импорт завершён.
@@ -370,6 +399,7 @@ class BSI_Importer {
                                 'status'         => 'completed',
                                 'processed_rows' => $state['total_rows'],
                                 'last_offset'    => $state['total_rows'],
+                                'file_position'  => 0,
                         ) );
 
                         // Пометить файл как обработанный.
@@ -494,19 +524,23 @@ class BSI_Importer {
                         }
 
                         // ─── КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ ─────────────────────────────────
-                        // Обновляем last_offset ПОСЛЕ КАЖДОЙ модели, а не после всего батча.
-                        // Без этого при PHP timeout last_offset не обновляется →
-                        // JS повторяет батч → создаёт ДУБЛИКАТЫ.
-                        $new_offset = $current_index;
+                        // Обновляем state ПОСЛЕ КАЖДОЙ модели, а не после всего батча.
+                        // Сохраняем file_position для мгновенного fseek при следующем батче.
                         $this->update_import_state( array(
                                 'processed_rows'  => $state['processed_rows'] + count( $data['variants'] ),
-                                'last_offset'     => $new_offset,
+                                'last_offset'     => $state['last_offset'] + count( $data['variants'] ),
+                                'file_position'   => $new_file_pos,
                                 'elapsed_seconds' => $state['elapsed_seconds'] + ( microtime( true ) - $start_time ),
                                 'errors_count'    => $state['errors_count'] + $errors,
                                 'last_error'      => $last_error ?: $state['last_error'],
                                 'created_products' => $state['created_products'] + $created,
                                 'updated_products' => $state['updated_products'] + $updated,
                         ) );
+                        $state['last_offset'] += count( $data['variants'] );
+                        $state['processed_rows'] += count( $data['variants'] );
+                        $state['created_products'] += $created;
+                        $state['updated_products'] += $updated;
+                        $state['errors_count'] += $errors;
                         // Сбрасываем локальные счётчики (уже записали в state).
                         $created = 0;
                         $updated = 0;
@@ -517,14 +551,14 @@ class BSI_Importer {
 
                 $elapsed_batch = microtime( true ) - $start_time;
 
-                // Обновляем состояние.
-                $new_offset = $current_index;
+                // Обновляем состояние (file_position для мгновенного fseek).
                 $new_processed = $state['processed_rows'] + count( $batch_rows );
                 $total_elapsed = $state['elapsed_seconds'] + $elapsed_batch;
 
                 $this->update_import_state( array(
                         'processed_rows'  => $new_processed,
-                        'last_offset'     => $new_offset,
+                        'last_offset'     => $state['last_offset'],
+                        'file_position'   => $new_file_pos,
                         'elapsed_seconds' => $total_elapsed,
                         'errors_count'    => $state['errors_count'] + $errors,
                         'last_error'      => $last_error ?: $state['last_error'],

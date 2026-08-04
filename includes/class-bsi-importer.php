@@ -301,6 +301,26 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => sprintf( __( 'Импорт не запущен (статус: %s)', 'beestore-integration' ), $state['status'] ) ) );
                 }
 
+                // Проверяем lock — если cron или другой процесс уже импортирует,
+                // AJAX не запускает параллельный.
+                $lock = get_transient( 'bsi_import_lock' );
+                if ( false !== $lock ) {
+                        $lock_age = time() - (int) $lock;
+                        $lock_pid = (int) get_transient( 'bsi_import_lock_pid' );
+                        $current_pid = function_exists( 'getmypid' ) ? getmypid() : 0;
+                        // Если lock от другого PID и свежий — выходим.
+                        if ( $lock_pid !== $current_pid && $lock_age < 1800 ) {
+                                wp_send_json_error( array(
+                                        'message' => sprintf(
+                                            /* translators: 1: секунды, 2: PID процесса */
+                                            __( 'Импорт уже идёт в другом процессе (%1$d сек, PID %2$d). Подождите или сбросьте lock.', 'beestore-integration' ),
+                                            $lock_age,
+                                            $lock_pid
+                                        ),
+                                ) );
+                        }
+                }
+
                 if ( empty( $state['csv_file'] ) || ! file_exists( $state['csv_file'] ) ) {
                         $this->update_import_state( array(
                                 'status'     => 'error',
@@ -553,7 +573,18 @@ class BSI_Importer {
 
                 // Сбрасываем состояние.
                 delete_option( 'bsi_import_state' );
-                wp_send_json_success( array( 'message' => __( 'Импорт остановлен. Прогресс сброшен.', 'beestore-integration' ) ) );
+
+                // Сбрасываем lock импорта.
+                delete_transient( 'bsi_import_lock' );
+                delete_transient( 'bsi_import_lock_pid' );
+
+                // Помечаем cron как «нужно пропустить следующую итерацию»
+                // (на случай если cron уже запущен — он проверит этот флаг).
+                set_transient( 'bsi_import_stop_requested', time(), 600 );
+
+                wp_send_json_success( array(
+                        'message' => __( 'Импорт остановлен. Прогресс сброшен. Lock снят.', 'beestore-integration' ),
+                ) );
         }
 
         /* ---------------------------------------------------------------------
@@ -843,6 +874,23 @@ class BSI_Importer {
          * Точка входа для cron.
          * --------------------------------------------------------------------- */
         public function cron_import() {
+                // Проверяем lock — если идёт другой импорт (например ручной AJAX),
+                // cron не запускает параллельный.
+                $lock = get_transient( 'bsi_import_lock' );
+                if ( false !== $lock ) {
+                        $lock_age = time() - (int) $lock;
+                        if ( $lock_age < 1800 ) {
+                                $this->log( 'info', 'Cron: импорт уже идёт в другом процессе — пропускаем', array(
+                                        'lock_age_seconds' => $lock_age,
+                                ) );
+                                return;
+                        }
+                        // Старый зависший lock — сбрасываем.
+                        $this->log( 'warning', 'Cron: обнаружен зависший lock импорта — сбрасываем', array( 'lock_age' => $lock_age ) );
+                        delete_transient( 'bsi_import_lock' );
+                        delete_transient( 'bsi_import_lock_pid' );
+                }
+
                 $this->log( 'info', 'Запуск cron-импорта каталога' );
 
                 $result = BSI_FTP::instance()->fetch_latest_zip();
@@ -904,10 +952,50 @@ class BSI_Importer {
          * @return array Отчёт.
          * --------------------------------------------------------------------- */
         public function import_csv_file( $csv_file, $zip_file = '' ) {
+                // ─── ЗАЩИТА ОТ ПАРАЛЛЕЛЬНОГО ИМПОРТА ────────────────────────────────
+                // Если импорт уже идёт (другой процесс cron или AJAX) — выходим.
+                // Без этого два процесса могут одновременно создавать дубли товаров.
+                $lock = get_transient( 'bsi_import_lock' );
+                if ( false !== $lock ) {
+                        $lock_age = time() - (int) $lock;
+                        // Если лок больше 30 минут — считаем зависшим, сбрасываем.
+                        if ( $lock_age < 1800 ) {
+                                $this->log( 'warning', 'Импорт уже идёт в другом процессе — пропускаем', array(
+                                        'lock_age_seconds' => $lock_age,
+                                        'csv'              => basename( $csv_file ),
+                                ) );
+                                return array(
+                                        'success' => false,
+                                        'error'   => 'import_in_progress',
+                                        'message' => sprintf(
+                                            /* translators: %d — секунды */
+                                            __( 'Импорт уже идёт в другом процессе (%d сек назад начат). Пропускаем.', 'beestore-integration' ),
+                                            $lock_age
+                                        ),
+                                );
+                        }
+                        $this->log( 'warning', 'Старый lock импорта обнаружен — сбрасываем', array( 'lock_age' => $lock_age ) );
+                }
+                set_transient( 'bsi_import_lock', time(), 1800 ); // 30 минут максимум.
+
+                // Сохраняем PID для диагностики.
+                $lock_pid = function_exists( 'getmypid' ) ? getmypid() : 0;
+                set_transient( 'bsi_import_lock_pid', $lock_pid, 1800 );
+
+                // Регистрируем shutdown-функцию чтобы гарантированно освободить lock
+                // даже при fatal error или timeout.
+                register_shutdown_function( function () {
+                        delete_transient( 'bsi_import_lock' );
+                        delete_transient( 'bsi_import_lock_pid' );
+                } );
+                // ────────────────────────────────────────────────────────────────────
+
                 $start_time = microtime( true );
                 $parser     = BSI_CSV_Parser::instance()->open( $csv_file );
                 if ( is_wp_error( $parser ) ) {
                         $this->log( 'error', 'Не удалось открыть CSV', array( 'file' => $csv_file, 'err' => $parser->get_error_message() ) );
+                        delete_transient( 'bsi_import_lock' );
+                        delete_transient( 'bsi_import_lock_pid' );
                         return array( 'success' => false, 'error' => $parser->get_error_message() );
                 }
 
@@ -1019,6 +1107,10 @@ class BSI_Importer {
 
                 $this->log( 'info', 'Импорт завершён', $report );
 
+                // Снимаем lock импорта.
+                delete_transient( 'bsi_import_lock' );
+                delete_transient( 'bsi_import_lock_pid' );
+
                 return $report;
         }
 
@@ -1072,6 +1164,25 @@ class BSI_Importer {
          * --------------------------------------------------------------------- */
         private function upsert_simple_product( $igu_articolo, $parent_row, $row ) {
                 $product_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu_articolo );
+
+                // Если по meta не нашли — пробуем найти по SKU (CodArticolo).
+                // Это помогает для товаров, импортированных старыми версиями плагина
+                // без meta _bsi_igu_articolo.
+                if ( ! $product_id && ! empty( $row['CodArticolo'] ) ) {
+                        $found_by_sku = wc_get_product_id_by_sku( $row['CodArticolo'] );
+                        if ( $found_by_sku ) {
+                                $found_product = wc_get_product( $found_by_sku );
+                                // Убеждаемся, что это простой товар (не вариация).
+                                if ( $found_product instanceof WC_Product_Simple ) {
+                                        $product_id = $found_by_sku;
+                                        $this->log( 'info', 'Простой товар найден по SKU (а не по meta)', array(
+                                                'sku'         => $row['CodArticolo'],
+                                                'product_id'  => $product_id,
+                                                'igu'         => $igu_articolo,
+                                        ) );
+                                }
+                        }
+                }
 
                 $product = ( $product_id )
                         ? wc_get_product( $product_id )
@@ -2204,30 +2315,57 @@ class BSI_Importer {
                 $basename = basename( parse_url( $url, PHP_URL_PATH ) );
                 $filename_without_ext = pathinfo( $basename, PATHINFO_FILENAME );
 
+                // СТАТИЧЕСКИЙ КЕШ внутри одного запроса/импорта: один и тот же URL
+                // не должен обрабатываться дважды. Без этого при повторном появлении
+                // URL в CSV (а BeeStore дублирует URL для разных размеров одной модели)
+                // мы можем попасть в race condition.
+                static $cache = array();
+                $cache_key = $url . '|' . $filename_without_ext;
+                if ( isset( $cache[ $cache_key ] ) ) {
+                        return $cache[ $cache_key ];
+                }
+
                 // 1. Сначала ищем по meta _bsi_image_url (точное совпадение URL).
                 $existing = $this->find_attachment_by_meta( '_bsi_image_url', $url );
                 if ( $existing ) {
+                        $cache[ $cache_key ] = $existing;
                         return $existing;
                 }
 
                 // 2. Ищем по _bsi_image_basename (без расширения) — переиспользование.
                 $existing_by_name = $this->find_attachment_by_basename( $filename_without_ext );
                 if ( $existing_by_name ) {
-                        // Сохраняем URL в meta для будущего точного поиска.
-                        update_post_meta( $existing_by_name, '_bsi_image_url', $url );
-
-                        // Проверяем, изменился ли файл на сервере BeeStore.
-                        if ( $this->image_changed_on_server( $url, $existing_by_name ) ) {
-                                // Файл изменился — нужно перескачать.
-                                $this->log( 'info', 'Картинка изменилась на сервере — перескачиваем', array(
-                                        'url'             => $url,
-                                        'attachment_id'   => $existing_by_name,
+                        // Проверяем, что attachment реально существует (не был удалён).
+                        $attach = get_post( $existing_by_name );
+                        if ( ! $attach || 'attachment' !== $attach->post_type ) {
+                                // Attachment удалён — нужно скачать заново.
+                                $this->log( 'info', 'Attachment не существует (удалён) — скачиваем заново', array(
+                                        'url'                => $url,
+                                        'attachment_id_old'  => $existing_by_name,
                                 ) );
-                                // Удаляем старый attachment и скачиваем заново.
-                                wp_delete_attachment( $existing_by_name, true );
                         } else {
-                                // Файл не изменился — просто переиспользуем.
-                                return $existing_by_name;
+                                // Сохраняем URL в meta для будущего точного поиска.
+                                update_post_meta( $existing_by_name, '_bsi_image_url', $url );
+
+                                // Проверяем, изменился ли файл на сервере BeeStore.
+                                $changed = $this->image_changed_on_server( $url, $existing_by_name );
+
+                                if ( $changed ) {
+                                        // Файл изменился — нужно перескачать.
+                                        $this->log( 'info', 'Картинка изменилась на сервере — перескачиваем', array(
+                                                'url'             => $url,
+                                                'attachment_id'   => $existing_by_name,
+                                        ) );
+                                        // Удаляем старый attachment физически и из БД.
+                                        wp_delete_attachment( $existing_by_name, true );
+                                        // Очищаем кеш postmeta чтобы следующий запрос не вернул старую запись.
+                                        clean_post_cache( $existing_by_name );
+                                        wp_cache_delete( $existing_by_name, 'post_meta' );
+                                } else {
+                                        // Файл не изменился — просто переиспользуем.
+                                        $cache[ $cache_key ] = $existing_by_name;
+                                        return $existing_by_name;
+                                }
                         }
                 }
 
@@ -2263,6 +2401,7 @@ class BSI_Importer {
                         $this->convert_attachment_to_webp( $attach_id );
                 }
 
+                $cache[ $cache_key ] = $attach_id;
                 return $attach_id;
         }
 

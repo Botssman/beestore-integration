@@ -1073,6 +1073,25 @@ class BSI_Importer {
         private function upsert_simple_product( $igu_articolo, $parent_row, $row ) {
                 $product_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu_articolo );
 
+                // Если по meta не нашли — пробуем найти по SKU (CodArticolo).
+                // Это помогает для товаров, импортированных старыми версиями плагина
+                // без meta _bsi_igu_articolo.
+                if ( ! $product_id && ! empty( $row['CodArticolo'] ) ) {
+                        $found_by_sku = wc_get_product_id_by_sku( $row['CodArticolo'] );
+                        if ( $found_by_sku ) {
+                                $found_product = wc_get_product( $found_by_sku );
+                                // Убеждаемся, что это простой товар (не вариация).
+                                if ( $found_product instanceof WC_Product_Simple ) {
+                                        $product_id = $found_by_sku;
+                                        $this->log( 'info', 'Простой товар найден по SKU (а не по meta)', array(
+                                                'sku'         => $row['CodArticolo'],
+                                                'product_id'  => $product_id,
+                                                'igu'         => $igu_articolo,
+                                        ) );
+                                }
+                        }
+                }
+
                 $product = ( $product_id )
                         ? wc_get_product( $product_id )
                         : new WC_Product_Simple();
@@ -2204,30 +2223,57 @@ class BSI_Importer {
                 $basename = basename( parse_url( $url, PHP_URL_PATH ) );
                 $filename_without_ext = pathinfo( $basename, PATHINFO_FILENAME );
 
+                // СТАТИЧЕСКИЙ КЕШ внутри одного запроса/импорта: один и тот же URL
+                // не должен обрабатываться дважды. Без этого при повторном появлении
+                // URL в CSV (а BeeStore дублирует URL для разных размеров одной модели)
+                // мы можем попасть в race condition.
+                static $cache = array();
+                $cache_key = $url . '|' . $filename_without_ext;
+                if ( isset( $cache[ $cache_key ] ) ) {
+                        return $cache[ $cache_key ];
+                }
+
                 // 1. Сначала ищем по meta _bsi_image_url (точное совпадение URL).
                 $existing = $this->find_attachment_by_meta( '_bsi_image_url', $url );
                 if ( $existing ) {
+                        $cache[ $cache_key ] = $existing;
                         return $existing;
                 }
 
                 // 2. Ищем по _bsi_image_basename (без расширения) — переиспользование.
                 $existing_by_name = $this->find_attachment_by_basename( $filename_without_ext );
                 if ( $existing_by_name ) {
-                        // Сохраняем URL в meta для будущего точного поиска.
-                        update_post_meta( $existing_by_name, '_bsi_image_url', $url );
-
-                        // Проверяем, изменился ли файл на сервере BeeStore.
-                        if ( $this->image_changed_on_server( $url, $existing_by_name ) ) {
-                                // Файл изменился — нужно перескачать.
-                                $this->log( 'info', 'Картинка изменилась на сервере — перескачиваем', array(
-                                        'url'             => $url,
-                                        'attachment_id'   => $existing_by_name,
+                        // Проверяем, что attachment реально существует (не был удалён).
+                        $attach = get_post( $existing_by_name );
+                        if ( ! $attach || 'attachment' !== $attach->post_type ) {
+                                // Attachment удалён — нужно скачать заново.
+                                $this->log( 'info', 'Attachment не существует (удалён) — скачиваем заново', array(
+                                        'url'                => $url,
+                                        'attachment_id_old'  => $existing_by_name,
                                 ) );
-                                // Удаляем старый attachment и скачиваем заново.
-                                wp_delete_attachment( $existing_by_name, true );
                         } else {
-                                // Файл не изменился — просто переиспользуем.
-                                return $existing_by_name;
+                                // Сохраняем URL в meta для будущего точного поиска.
+                                update_post_meta( $existing_by_name, '_bsi_image_url', $url );
+
+                                // Проверяем, изменился ли файл на сервере BeeStore.
+                                $changed = $this->image_changed_on_server( $url, $existing_by_name );
+
+                                if ( $changed ) {
+                                        // Файл изменился — нужно перескачать.
+                                        $this->log( 'info', 'Картинка изменилась на сервере — перескачиваем', array(
+                                                'url'             => $url,
+                                                'attachment_id'   => $existing_by_name,
+                                        ) );
+                                        // Удаляем старый attachment физически и из БД.
+                                        wp_delete_attachment( $existing_by_name, true );
+                                        // Очищаем кеш postmeta чтобы следующий запрос не вернул старую запись.
+                                        clean_post_cache( $existing_by_name );
+                                        wp_cache_delete( $existing_by_name, 'post_meta' );
+                                } else {
+                                        // Файл не изменился — просто переиспользуем.
+                                        $cache[ $cache_key ] = $existing_by_name;
+                                        return $existing_by_name;
+                                }
                         }
                 }
 
@@ -2263,6 +2309,7 @@ class BSI_Importer {
                         $this->convert_attachment_to_webp( $attach_id );
                 }
 
+                $cache[ $cache_key ] = $attach_id;
                 return $attach_id;
         }
 

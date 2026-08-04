@@ -2369,28 +2369,14 @@ class BSI_Importer {
                                         'attachment_id_old'  => $existing_by_name,
                                 ) );
                         } else {
-                                // Сохраняем URL в meta для будущего точного поиска.
+                                // Attachment существует — просто переиспользуем БЕЗ проверки ETag.
+                                // Раньше тут был HTTP HEAD запрос к BeeStore для проверки изменения файла,
+                                // но это замедляло импорт в 10-20 раз (по 1-2 сек на каждую картинку).
+                                // Теперь: если картинка уже скачана — переиспользуем как есть.
+                                // Если нужно обновить — удали вручную через "Удалить только картинки BeeStore".
                                 update_post_meta( $existing_by_name, '_bsi_image_url', $url );
-
-                                // Проверяем, изменился ли файл на сервере BeeStore.
-                                $changed = $this->image_changed_on_server( $url, $existing_by_name );
-
-                                if ( $changed ) {
-                                        // Файл изменился — нужно перескачать.
-                                        $this->log( 'info', 'Картинка изменилась на сервере — перескачиваем', array(
-                                                'url'             => $url,
-                                                'attachment_id'   => $existing_by_name,
-                                        ) );
-                                        // Удаляем старый attachment физически и из БД.
-                                        wp_delete_attachment( $existing_by_name, true );
-                                        // Очищаем кеш postmeta чтобы следующий запрос не вернул старую запись.
-                                        clean_post_cache( $existing_by_name );
-                                        wp_cache_delete( $existing_by_name, 'post_meta' );
-                                } else {
-                                        // Файл не изменился — просто переиспользуем.
-                                        $cache[ $cache_key ] = $existing_by_name;
-                                        return $existing_by_name;
-                                }
+                                $cache[ $cache_key ] = $existing_by_name;
+                                return $existing_by_name;
                         }
                 }
 

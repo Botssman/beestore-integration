@@ -492,6 +492,27 @@ class BSI_Importer {
                                         'err' => $last_error,
                                 ) );
                         }
+
+                        // ─── КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ ─────────────────────────────────
+                        // Обновляем last_offset ПОСЛЕ КАЖДОЙ модели, а не после всего батча.
+                        // Без этого при PHP timeout last_offset не обновляется →
+                        // JS повторяет батч → создаёт ДУБЛИКАТЫ.
+                        $new_offset = $current_index;
+                        $this->update_import_state( array(
+                                'processed_rows'  => $state['processed_rows'] + count( $data['variants'] ),
+                                'last_offset'     => $new_offset,
+                                'elapsed_seconds' => $state['elapsed_seconds'] + ( microtime( true ) - $start_time ),
+                                'errors_count'    => $state['errors_count'] + $errors,
+                                'last_error'      => $last_error ?: $state['last_error'],
+                                'created_products' => $state['created_products'] + $created,
+                                'updated_products' => $state['updated_products'] + $updated,
+                        ) );
+                        // Сбрасываем локальные счётчики (уже записали в state).
+                        $created = 0;
+                        $updated = 0;
+                        $errors = 0;
+                        $last_error = '';
+                        // ─────────────────────────────────────────────────────────────
                 }
 
                 $elapsed_batch = microtime( true ) - $start_time;

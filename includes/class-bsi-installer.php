@@ -45,7 +45,7 @@ class BSI_Installer {
                                 'enable_realtime_stock' => '0',
                                 'sync_frequency'     => 'hourly',
                                 'status_sync_frequency' => 'hourly',
-                                'import_batch_size'  => 200,
+                                'import_batch_size'  => 25,
                                 'download_images'    => '1',
                                 'delete_out_of_stock' => '0', // Если 1 — снимать с публикации товары, отсутствующие в выгрузке.
                                 'mapping_payment'    => array(), // WC gateway_id => IDTipoIncasso.

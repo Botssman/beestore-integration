@@ -394,31 +394,37 @@ class BSI_Importer {
                 fclose( $handle );
 
                 if ( empty( $batch_rows ) ) {
-                        // Импорт завершён.
+                        // ─── ЗАЩИТНАЯ ПРОВЕРКА ─────────────────────────────────
+                        // batch_rows пустой, но мы НЕ обработали все строки?
+                        // Это значит file_position повредилась — fseek прыгнул в конец.
+                        // НЕ завершаем импорт, а сбрасываем file_position и продолжаем.
+                        if ( $state['processed_rows'] < $state['total_rows'] ) {
+                                $this->log( 'error', 'batch_rows пустой но обработано не всё — сброс file_position', array(
+                                        'processed'      => $state['processed_rows'],
+                                        'total'          => $state['total_rows'],
+                                        'file_position'  => $file_pos,
+                                        'new_file_pos'   => $new_file_pos,
+                                ) );
+                                $this->update_import_state( array(
+                                        'file_position' => 0,
+                                ) );
+                                wp_send_json_error( array(
+                                        'message' => sprintf(
+                                            /* translators: 1: processed, 2: total */
+                                            __( 'Сбой позиции файла (обработано %1$d из %2$d). Перезапуск с начала файла...', 'beestore-integration' ),
+                                            $state['processed_rows'],
+                                            $state['total_rows']
+                                        ),
+                                ) );
+                        }
+
+                        // Действительно конец файла — импорт завершён.
                         $this->update_import_state( array(
                                 'status'         => 'completed',
                                 'processed_rows' => $state['total_rows'],
                                 'last_offset'    => $state['total_rows'],
                                 'file_position'  => 0,
                         ) );
-
-                        // Пометить файл как обработанный.
-                        $file_to_mark = $fetch_result['zip'] ?? '';
-                        if ( ! $file_to_mark ) {
-                                $file_to_mark = $state['csv_file'];
-                        }
-                        BSI_FTP::instance()->mark_processed( $file_to_mark );
-
-                        update_option( 'bsi_last_import_finished', current_time( 'mysql' ) );
-
-                        $report = array(
-                                'success'         => true,
-                                'rows_processed'  => $state['processed_rows'],
-                                'elapsed_seconds' => $state['elapsed_seconds'],
-                        );
-                        update_option( 'bsi_last_import_report', $report );
-
-                        $this->log( 'info', 'Импорт завершён', $report );
 
                         wp_send_json_success( array(
                                 'message' => __( 'Импорт завершён!', 'beestore-integration' ),

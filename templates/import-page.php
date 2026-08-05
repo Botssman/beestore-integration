@@ -420,21 +420,36 @@ jQuery(document).ready(function($){
                                         stopBatchLoop();
                                 }
                         }).fail(function() {
-                                appendLog('AJAX error — возможно PHP timeout. Подождите 10 сек и попробуйте ещё раз.', 'error');
+                                appendLog('AJAX error — возможно PHP timeout. Сбрасываю lock и возобновляю...', 'error');
                                 importRunning = false;
                                 stopBatchLoop();
-                                // Авто-возобновление через 10 секунд.
-                                setTimeout(function() {
-                                        $.post(bsiAdmin.ajaxUrl, {
-                                                action: 'bsi_import_status',
-                                                nonce: bsiAdmin.nonce
-                                        }, function(resp) {
-                                                if (resp.success && resp.data.state.status === 'running') {
-                                                        appendLog('Авто-возобновление...', 'info');
-                                                        startBatchLoop();
-                                                }
-                                        });
-                                }, 10000);
+                                // Сбрасываем lock от убитого PHP-процесса.
+                                $.post(bsiAdmin.ajaxUrl, {
+                                        action: 'bsi_stop_cron_import',
+                                        nonce: bsiAdmin.nonce
+                                }, function() {
+                                        // Ждём 3 сек и возобновляем.
+                                        setTimeout(function() {
+                                                $.post(bsiAdmin.ajaxUrl, {
+                                                        action: 'bsi_import_status',
+                                                        nonce: bsiAdmin.nonce
+                                                }, function(resp) {
+                                                        if (resp.success && resp.data.state.status === 'running') {
+                                                                appendLog('Авто-возобновление после таймаута...', 'info');
+                                                                startBatchLoop();
+                                                        } else if (resp.success) {
+                                                                // Статус не 'running' — возможно completed или error.
+                                                                appendLog('Импорт остановлен (статус: ' + resp.data.state.status + ')', 'info');
+                                                        } else {
+                                                                appendLog('Не удалось получить статус импорта', 'error');
+                                                        }
+                                                }).fail(function() {
+                                                        appendLog('Не удалось возобновить. Обновите страницу и нажмите «Продолжить».', 'error');
+                                                });
+                                        }, 3000);
+                                }).fail(function() {
+                                        appendLog('Не удалось сбросить lock. Обновите страницу и нажмите «Продолжить».', 'error');
+                                });
                         });
                 }
 

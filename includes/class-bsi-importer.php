@@ -463,20 +463,19 @@ class BSI_Importer {
 
                 // Импортируем каждую модель.
                 $skipped_by_filter = 0;
+                $batch_created  = 0;
+                $batch_updated  = 0;
+                $batch_errors   = 0;
+                $batch_last_err = '';
                 foreach ( $models_in_batch as $igu => $data ) {
                         try {
-                                // Получаем макро-категорию, подкатегорию и бренд из строки для проверки фильтром.
                                 $row = $data['parent'];
-
-                                // Макро-категория (CLOTHING, SHOES, BAGS).
                                 $category = '';
                                 if ( ! empty( $row['DSRepartoWeb'] ) ) {
                                         $category = $row['DSRepartoWeb'];
                                 } elseif ( ! empty( $row['DSReparto'] ) ) {
                                         $category = $row['DSReparto'];
                                 }
-
-                                // Если макро-категории нет — используем подкатегорию.
                                 if ( ! $category ) {
                                         if ( ! empty( $row['DSCategoriaMerceologicaWeb'] ) ) {
                                                 $category = $row['DSCategoriaMerceologicaWeb'];
@@ -484,81 +483,50 @@ class BSI_Importer {
                                                 $category = $row['DSCategoriaMerceologica'];
                                         }
                                 }
-
                                 $brand = '';
                                 if ( ! empty( $row['DSLinea'] ) ) {
                                         $brand = $row['DSLinea'];
                                 } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
                                         $brand = $row['RaggruppamentoLinea'];
                                 }
-
-                                // Проверяем фильтром.
                                 if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand ) ) {
                                         $skipped_by_filter++;
                                         continue;
                                 }
-
-                                // Определяем, многовариантный ли это товар ВО ВСЁМ ФАЙЛЕ (не в батче!).
                                 $total_count = isset( $index[ $igu ] ) ? $index[ $igu ] : count( $data['variants'] );
                                 $is_multi_variant = $total_count > 1;
-
-                                // Проверяем, новый ли товар (по meta).
                                 $existing_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu );
                                 $this->upsert_model( $igu, $data['parent'], $data['variants'], $is_multi_variant );
-
-                                // Увеличиваем счётчики фильтров (для лимитов).
                                 BSI_Import_Filters::instance()->increment_counters( $category, $brand );
-
                                 if ( $existing_id ) {
-                                        $updated++;
+                                        $batch_updated++;
                                 } else {
-                                        $created++;
+                                        $batch_created++;
                                 }
                         } catch ( Exception $e ) {
-                                $errors++;
-                                $last_error = $e->getMessage();
+                                $batch_errors++;
+                                $batch_last_err = $e->getMessage();
                                 $this->log( 'error', 'Ошибка импорта модели', array(
                                         'igu' => $igu,
-                                        'err' => $last_error,
+                                        'err' => $batch_last_err,
                                 ) );
                         }
-
-                        // Обновляем счётчики (без file_position — его сохраним в конце батча).
-                        $state['last_offset'] += count( $data['variants'] );
-                        $state['processed_rows'] += count( $data['variants'] );
-                        $state['created_products'] += $created;
-                        $state['updated_products'] += $updated;
-                        $state['errors_count'] += $errors;
-                        $created = 0;
-                        $updated = 0;
-                        $errors = 0;
-                        $last_error = '';
                 }
-
-                // Сохраняем file_position ТОЛЬКО в конце батча.
-                // Не после каждой модели — потому что $new_file_pos указывает на КОНЕЦ
-                // всего батча, а не на позицию после текущей модели. Если сохранить
-                // его после первой модели и PHP таймаутит — следующая итерация
-                // сикипает все остальные модели.
-                // Вместо этого: если PHP таймаутит mid-batch, следующий вызов
-                // перечитает тот же батч. Дубликатов не будет, потому что
-                // find_variation_by_meta (SQL) найдёт уже созданные вариации.
 
                 $elapsed_batch = microtime( true ) - $start_time;
 
-                // Обновляем состояние (file_position для мгновенного fseek).
-                $new_processed = $state['processed_rows'] + count( $batch_rows );
-                $total_elapsed = $state['elapsed_seconds'] + $elapsed_batch;
-
+                // Записываем в DB: текущие значения + результаты этого батча.
+                // Читаем заново из DB — вдруг другой процесс (cron) тоже обновлял.
+                $db_state = $this->get_import_state();
                 $this->update_import_state( array(
-                        'processed_rows'  => $new_processed,
-                        'last_offset'     => $state['last_offset'],
-                        'file_position'   => $new_file_pos,
-                        'elapsed_seconds' => $total_elapsed,
-                        'errors_count'    => $state['errors_count'] + $errors,
-                        'last_error'      => $last_error ?: $state['last_error'],
-                        'created_products' => $state['created_products'] + $created,
-                        'updated_products' => $state['updated_products'] + $updated,
+                        'processed_rows'   => $db_state['processed_rows'] + count( $batch_rows ),
+                        'last_offset'      => $db_state['last_offset'] + count( $batch_rows ),
+                        'file_position'    => $new_file_pos,
+                        'elapsed_seconds'  => $db_state['elapsed_seconds'] + $elapsed_batch,
+                        'errors_count'     => $db_state['errors_count'] + $batch_errors,
+                        'last_error'       => $batch_last_err ?: $db_state['last_error'],
+                        'created_products' => $db_state['created_products'] + $batch_created,
+                        'updated_products' => $db_state['updated_products'] + $batch_updated,
                 ));
 
                 $updated_state = $this->get_import_state();

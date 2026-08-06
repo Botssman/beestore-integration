@@ -2929,6 +2929,14 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
                 }
 
+                // Проверяем флаг остановки — если пользователь нажал Stop,
+                // не позволяем JS перезапустить процесс.
+                $stop_flag = get_transient( 'bsi_image_stop_requested' );
+                if ( false !== $stop_flag ) {
+                        delete_transient( 'bsi_image_stop_requested' );
+                        wp_send_json_error( array( 'message' => __( 'Импорт картинок остановлен пользователем.', 'beestore-integration' ) ) );
+                }
+
                 // Проверяем статус процесса (paused? stopped?).
                 $img_state = get_option( 'bsi_image_import_state', array() );
                 $status    = isset( $img_state['status'] ) ? $img_state['status'] : 'idle';
@@ -3111,6 +3119,9 @@ class BSI_Importer {
                 }
                 delete_option( 'bsi_image_import_state' );
                 delete_option( 'bsi_image_import_stats' );
+                // Ставим флаг остановки на 30 секунд — чтобы JS не смог
+                // перезапустить через pending setTimeout.
+                set_transient( 'bsi_image_stop_requested', time(), 30 );
                 wp_send_json_success( array( 'message' => __( 'Импорт картинок остановлен. Прогресс сброшен.', 'beestore-integration' ) ) );
         }
 

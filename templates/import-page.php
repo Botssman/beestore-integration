@@ -615,6 +615,7 @@ jQuery(document).ready(function($){
 
         // ─── Импорт картинок ──────────────────────────────────────────
         var backfillRunning = false;
+        var backfillTimer = null;
 
         // При загрузке страницы — проверяем состояние импорта картинок.
         // Если процесс идёт (running) → восстанавливаем UI и авто-возобновляем.
@@ -626,6 +627,8 @@ jQuery(document).ready(function($){
                 }, function(response) {
                         if (!response.success) return;
                         var s = response.data;
+                        // Если стоит флаг остановки — не возобновляем.
+                        if (s.status === 'idle' || s.status === 'stopped') return;
                         if (s.status === 'running' || s.status === 'paused') {
                                 $('#bsi-backfill-progress').show();
                                 var stats = s.stats || {};
@@ -694,8 +697,9 @@ jQuery(document).ready(function($){
         $('#bsi-backfill-stop').on('click', function(e) {
                 e.preventDefault();
                 if (!confirm('<?php esc_attr_e( 'Остановить импорт картинок? Прогресс будет сброшен.', 'beestore-integration' ); ?>')) return;
+                backfillRunning = false;
+                if (backfillTimer) { clearTimeout(backfillTimer); backfillTimer = null; }
                 $.post(bsiAdmin.ajaxUrl, { action: 'bsi_backfill_stop', nonce: bsiAdmin.nonce }, function() {
-                        backfillRunning = false;
                         $('#bsi-backfill-images').prop('disabled', false);
                         $('#bsi-backfill-pause').hide();
                         $('#bsi-backfill-resume').hide();
@@ -723,7 +727,7 @@ jQuery(document).ready(function($){
                                 $('#bsi-backfill-status').html('<span style="color:#2271b1;">▶ Идёт импорт... ' + percent + '%</span>');
 
                                 if (d.has_more) {
-                                        setTimeout(runBackfill, 500);
+                                        backfillTimer = setTimeout(runBackfill, 500);
                                 } else {
                                         backfillRunning = false;
                                         $('#bsi-backfill-images').prop('disabled', false);
@@ -737,7 +741,7 @@ jQuery(document).ready(function($){
                 }).fail(function() {
                         if (!backfillRunning) return;
                         $('#bsi-backfill-status').html('<span style="color:#c62828;">AJAX timeout, возобновление через 3 сек...</span>');
-                        setTimeout(runBackfill, 3000);
+                        backfillTimer = setTimeout(runBackfill, 3000);
                 });
         }
 

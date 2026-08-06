@@ -3117,12 +3117,20 @@ class BSI_Importer {
                 if ( ! current_user_can( 'manage_woocommerce' ) ) {
                         wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
                 }
+                // Полный сброс ВСЕХ процессов импорта.
                 delete_option( 'bsi_image_import_state' );
                 delete_option( 'bsi_image_import_stats' );
-                // Ставим флаг остановки на 30 секунд — чтобы JS не смог
-                // перезапустить через pending setTimeout.
-                set_transient( 'bsi_image_stop_requested', time(), 30 );
-                wp_send_json_success( array( 'message' => __( 'Импорт картинок остановлен. Прогресс сброшен.', 'beestore-integration' ) ) );
+                delete_option( 'bsi_import_state' );
+
+                // Сбрасываем все lock'и.
+                delete_transient( 'bsi_import_lock' );
+                delete_transient( 'bsi_import_lock_pid' );
+
+                // Флаги остановки.
+                set_transient( 'bsi_image_stop_requested', time(), 60 );
+                set_transient( 'bsi_import_stop_requested', time(), 60 );
+
+                wp_send_json_success( array( 'message' => __( 'Импорт картинок и основной импорт остановлены. Все процессы сброшены.', 'beestore-integration' ) ) );
         }
 
         /**

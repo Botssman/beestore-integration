@@ -627,8 +627,15 @@ jQuery(document).ready(function($){
                 }, function(response) {
                         if (!response.success) return;
                         var s = response.data;
-                        // Если стоит флаг остановки — не возобновляем.
-                        if (s.status === 'idle' || s.status === 'stopped') return;
+                        // Если нет состояния (idle) — не возобновляем.
+                        if (s.status === 'idle' || s.status === 'stopped' || !s.status) return;
+                        // Если процесс завершён — показываем результат, не возобновляем.
+                        if (s.status === 'completed') {
+                                var stats = s.stats || {};
+                                $('#bsi-backfill-progress').show();
+                                $('#bsi-backfill-status').html('<span style="color:#2e7d32;">✓ Завершено! Скачано: ' + (stats.downloaded||0) + ', пропущено: ' + (stats.skipped||0) + '</span>');
+                                return;
+                        }
                         if (s.status === 'running' || s.status === 'paused') {
                                 $('#bsi-backfill-progress').show();
                                 var stats = s.stats || {};

@@ -75,6 +75,7 @@ class BSI_Importer {
                 add_action( 'wp_ajax_bsi_backfill_pause', array( $this, 'ajax_backfill_pause' ) );
                 add_action( 'wp_ajax_bsi_backfill_resume', array( $this, 'ajax_backfill_resume' ) );
                 add_action( 'wp_ajax_bsi_backfill_stop', array( $this, 'ajax_backfill_stop' ) );
+                add_action( 'wp_ajax_bsi_backfill_status', array( $this, 'ajax_backfill_status' ) );
         }
 
         /**
@@ -3093,6 +3094,30 @@ class BSI_Importer {
                 delete_option( 'bsi_image_import_state' );
                 delete_option( 'bsi_image_import_stats' );
                 wp_send_json_success( array( 'message' => __( 'Импорт картинок остановлен. Прогресс сброшен.', 'beestore-integration' ) ) );
+        }
+
+        /**
+         * AJAX: получить статус импорта картинок (для восстановления UI при перезагрузке).
+         */
+        public function ajax_backfill_status() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $state = get_option( 'bsi_image_import_state', array() );
+                $stats = get_option( 'bsi_image_import_stats', array() );
+
+                wp_send_json_success( array(
+                        'status'   => isset( $state['status'] ) ? $state['status'] : 'idle',
+                        'offset'   => isset( $state['offset'] ) ? (int) $state['offset'] : 0,
+                        'total'    => isset( $state['total'] ) ? (int) $state['total'] : 0,
+                        'stats'    => array(
+                                'downloaded' => isset( $stats['downloaded'] ) ? (int) $stats['downloaded'] : 0,
+                                'skipped'    => isset( $stats['skipped'] ) ? (int) $stats['skipped'] : 0,
+                                'failed'     => isset( $stats['failed'] ) ? (int) $stats['failed'] : 0,
+                        ),
+                ) );
         }
 
         /* ---------------------------------------------------------------------

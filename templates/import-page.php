@@ -616,6 +616,49 @@ jQuery(document).ready(function($){
         // ─── Импорт картинок ──────────────────────────────────────────
         var backfillRunning = false;
 
+        // При загрузке страницы — проверяем состояние импорта картинок.
+        // Если процесс идёт (running) → восстанавливаем UI и авто-возобновляем.
+        // Если на паузе (paused) → показываем кнопку «Продолжить».
+        function checkBackfillState() {
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_backfill_status',
+                        nonce: bsiAdmin.nonce
+                }, function(response) {
+                        if (!response.success) return;
+                        var s = response.data;
+                        if (s.status === 'running' || s.status === 'paused') {
+                                $('#bsi-backfill-progress').show();
+                                var stats = s.stats || {};
+                                $('#bsi-backfill-downloaded').text(stats.downloaded || 0);
+                                $('#bsi-backfill-skipped').text(stats.skipped || 0);
+                                $('#bsi-backfill-failed').text(stats.failed || 0);
+
+                                var percent = s.total > 0 ? Math.round((s.offset / s.total) * 100) : 0;
+                                $('#bsi-backfill-counter').text(s.offset + ' / ' + s.total + ' (' + percent + '%)');
+                                $('#bsi-backfill-progress .bsi-progress-fill').css('width', percent + '%');
+
+                                if (s.status === 'running') {
+                                        $('#bsi-backfill-images').prop('disabled', true);
+                                        $('#bsi-backfill-pause').show();
+                                        $('#bsi-backfill-stop').show();
+                                        $('#bsi-backfill-status').html('<span style="color:#2271b1;">▶ Идёт импорт... ' + percent + '%</span>');
+                                        backfillRunning = true;
+                                        runBackfill();
+                                } else {
+                                        $('#bsi-backfill-images').prop('disabled', true);
+                                        $('#bsi-backfill-resume').show();
+                                        $('#bsi-backfill-stop').show();
+                                        $('#bsi-backfill-status').html('<span style="color:#f57c00;">⏸ На паузе (' + percent + '%)</span>');
+                                }
+                        } else if (s.status === 'completed') {
+                                var stats = s.stats || {};
+                                $('#bsi-backfill-progress').show();
+                                $('#bsi-backfill-status').html('<span style="color:#2e7d32;">✓ Завершено! Скачано: ' + (stats.downloaded||0) + ', пропущено: ' + (stats.skipped||0) + '</span>');
+                        }
+                });
+        }
+        checkBackfillState();
+
         $('#bsi-backfill-images').on('click', function(e) {
                 e.preventDefault();
                 backfillRunning = true;

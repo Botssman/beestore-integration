@@ -2728,8 +2728,11 @@ class BSI_Importer {
                 }
                 global $wpdb;
                 $found = $wpdb->get_var( $wpdb->prepare(
-                        "SELECT post_id FROM {$wpdb->postmeta}
-                         WHERE meta_key = '_bsi_image_basename' AND meta_value = %s
+                        "SELECT pm.post_id FROM {$wpdb->postmeta} pm
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                         WHERE pm.meta_key = '_bsi_image_basename' AND pm.meta_value = %s
+                         AND p.post_type = 'attachment'
+                         AND p.post_status != 'trash'
                          LIMIT 1",
                         $basename
                 ) );
@@ -2819,14 +2822,20 @@ class BSI_Importer {
          * Найти attachment по meta-ключу.
          */
         private function find_attachment_by_meta( $key, $value ) {
-                $posts = get_posts( array(
-                        'post_type'      => 'attachment',
-                        'posts_per_page' => 1,
-                        'meta_key'       => $key, // phpcs:ignore
-                        'meta_value'     => $value, // phpcs:ignore
-                        'fields'         => 'ids',
+                // ПРЯМОЙ SQL вместо get_posts() — потому что WordPress кеширует
+                // WP_Query результаты и после создания нового attachment
+                // кеш не сбрасывается → find возвращает пустой → создаётся дубль.
+                global $wpdb;
+                $found = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT pm.post_id FROM {$wpdb->postmeta} pm
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                         WHERE pm.meta_key = %s AND pm.meta_value = %s
+                         AND p.post_type = 'attachment'
+                         LIMIT 1",
+                        $key,
+                        $value
                 ) );
-                return ! empty( $posts ) ? (int) $posts[0] : 0;
+                return $found ? (int) $found : 0;
         }
 
         /* ---------------------------------------------------------------------

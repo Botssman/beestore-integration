@@ -2596,25 +2596,27 @@ class BSI_Importer {
                         return 0;
                 }
 
-                // Скачиваем.
-                $attach_id = media_sideload_image( $url, $product_id, null, 'id' );
+                // Скачиваем. Передаём description = 'BeeStore image' чтобы
+                // media_sideload_image использовала его как post_title вместо
+                // basename файла (который совпадает со SKU товара и вызывает
+                // ложные warnings "Освобождён SKU у старого товара").
+                $attach_id = media_sideload_image( $url, $product_id, 'BeeStore image', 'id' );
                 if ( is_wp_error( $attach_id ) ) {
                         $this->log( 'warning', 'Не удалось скачать картинку', array( 'url' => $url, 'err' => $attach_id->get_error_message() ) );
                         return false;
                 }
 
+                // Явно задаём post_title и post_name — чтобы не совпадал со SKU.
+                wp_update_post( array(
+                        'ID'         => $attach_id,
+                        'post_title' => 'BeeStore ' . $filename_without_ext,
+                        'post_name'  => 'bsi-img-' . $filename_without_ext,
+                ) );
+
                 // Сохраняем meta.
                 update_post_meta( $attach_id, '_bsi_image_url', $url );
                 update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
                 update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
-
-                // Сохраняем информацию о файле на сервере для будущих проверок изменения.
-                $server_info = $this->get_image_server_info( $url );
-                if ( $server_info ) {
-                        update_post_meta( $attach_id, '_bsi_image_etag', $server_info['etag'] );
-                        update_post_meta( $attach_id, '_bsi_image_last_modified', $server_info['last_modified'] );
-                        update_post_meta( $attach_id, '_bsi_image_size', $server_info['size'] );
-                }
 
                 // Конвертация в WebP (если включена).
                 $settings = get_option( 'bsi_settings', array() );

@@ -993,6 +993,13 @@ class BSI_Importer {
          * Точка входа для cron.
          * --------------------------------------------------------------------- */
         public function cron_import() {
+                // Если импорт каталога отключён в настройках — выходим.
+                $settings = get_option( 'bsi_settings', array() );
+                $freq = isset( $settings['sync_frequency'] ) ? $settings['sync_frequency'] : 'hourly';
+                if ( 'disabled' === $freq ) {
+                        return;
+                }
+
                 // Проверяем lock — если идёт другой импорт (например ручной AJAX),
                 // cron не запускает параллельный.
                 $lock = get_transient( 'bsi_import_lock' );

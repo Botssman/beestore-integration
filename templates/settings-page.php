@@ -236,6 +236,7 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                                 <select name="bsi_settings[sync_frequency]" id="sync_frequency">
                                                         <?php
                                                         $frequencies = array(
+                                                                'disabled'   => __( 'Отключено (только вручную)', 'beestore-integration' ),
                                                                 'every15min' => __( 'Каждые 15 минут', 'beestore-integration' ),
                                                                 'every30min' => __( 'Каждые 30 минут', 'beestore-integration' ),
                                                                 'hourly'     => __( 'Каждый час', 'beestore-integration' ),

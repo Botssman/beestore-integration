@@ -70,6 +70,11 @@ class BSI_Importer {
 
                 // AJAX: пересчёт цен всех товаров по текущей формуле (для кнопки на странице Конвертации).
                 add_action( 'wp_ajax_bsi_recalculate_prices', array( $this, 'ajax_recalculate_prices' ) );
+
+                // AJAX: импорт картинок (отдельный процесс с прогрессом/паузой/стопом).
+                add_action( 'wp_ajax_bsi_backfill_pause', array( $this, 'ajax_backfill_pause' ) );
+                add_action( 'wp_ajax_bsi_backfill_resume', array( $this, 'ajax_backfill_resume' ) );
+                add_action( 'wp_ajax_bsi_backfill_stop', array( $this, 'ajax_backfill_stop' ) );
         }
 
         /**
@@ -472,6 +477,7 @@ class BSI_Importer {
                 $batch_created  = 0;
                 $batch_updated  = 0;
                 $batch_errors   = 0;
+                $batch_skipped  = 0;
                 $batch_last_err = '';
                 foreach ( $models_in_batch as $igu => $data ) {
                         try {
@@ -502,6 +508,14 @@ class BSI_Importer {
                                 $total_count = isset( $index[ $igu ] ) ? $index[ $igu ] : count( $data['variants'] );
                                 $is_multi_variant = $total_count > 1;
                                 $existing_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu );
+
+                                // ─── Пропуск неизменённых товаров ──────────────────────
+                                if ( $existing_id && $this->product_unchanged( $existing_id, $data['variants'] ) ) {
+                                        $batch_skipped++;
+                                        BSI_Import_Filters::instance()->increment_counters( $category, $brand );
+                                        continue;
+                                }
+
                                 $this->upsert_model( $igu, $data['parent'], $data['variants'], $is_multi_variant );
                                 BSI_Import_Filters::instance()->increment_counters( $category, $brand );
                                 if ( $existing_id ) {
@@ -1366,6 +1380,64 @@ class BSI_Importer {
                 $this->apply_terms( $product_id, $parent_row );
 
                 return $product_id;
+        }
+
+        /* ---------------------------------------------------------------------
+         * Проверить, изменился ли товар с прошлого импорта.
+         * Сравниваем: цену, скидку, остаток, название для каждой вариации.
+         * Если всё совпадает — пропускаем (return true = skip).
+         * --------------------------------------------------------------------- */
+        private function product_unchanged( $product_id, $variant_rows ) {
+                if ( ! $product_id ) {
+                        return false; // Новый товар — не пропускаем.
+                }
+
+                foreach ( $variant_rows as $row ) {
+                        $cod_articolo = isset( $row['CodArticolo'] ) ? $row['CodArticolo'] : '';
+                        if ( ! $cod_articolo ) {
+                                return false;
+                        }
+
+                        // Находим вариацию по SKU.
+                        global $wpdb;
+                        $var_id = $wpdb->get_var( $wpdb->prepare(
+                                "SELECT p.ID FROM {$wpdb->posts} p
+                                 INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID
+                                   AND pm.meta_key = '_sku' AND pm.meta_value = %s
+                                 WHERE p.post_type = 'product_variation'
+                                   AND p.post_parent = %d
+                                   AND p.post_status != 'trash'
+                                 LIMIT 1",
+                                $cod_articolo,
+                                $product_id
+                        ) );
+
+                        if ( ! $var_id ) {
+                                return false; // Вариация не найдена — нужно создать.
+                        }
+
+                        $variation = wc_get_product( $var_id );
+                        if ( ! $variation ) {
+                                return false;
+                        }
+
+                        // Сравниваем цену.
+                        $csv_price = $this->convert_price( isset( $row['PrezzoIvato'] ) ? (float) $row['PrezzoIvato'] : 0 );
+                        $wc_price  = (float) $variation->get_regular_price();
+                        if ( abs( $csv_price - $wc_price ) > 0.01 ) {
+                                return false; // Цена изменилась.
+                        }
+
+                        // Сравниваем остаток.
+                        $csv_stock = isset( $row['Disponibilita'] ) ? (float) $row['Disponibilita'] : 0;
+                        $wc_stock  = (float) $variation->get_stock_quantity();
+                        if ( $csv_stock !== $wc_stock ) {
+                                return false; // Остаток изменился.
+                        }
+                }
+
+                // Все вариации совпадают — товар не изменился.
+                return true;
         }
 
         /* ---------------------------------------------------------------------
@@ -2838,10 +2910,28 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
                 }
 
-                $batch_size = isset( $_POST['batch_size'] ) ? absint( $_POST['batch_size'] ) : 20;
-                $offset     = isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0;
+                // Проверяем статус процесса (paused? stopped?).
+                $img_state = get_option( 'bsi_image_import_state', array() );
+                $status    = isset( $img_state['status'] ) ? $img_state['status'] : 'idle';
+                if ( 'paused' === $status ) {
+                        wp_send_json_error( array( 'message' => __( 'Импорт картинок на паузе. Нажмите «Продолжить».', 'beestore-integration' ) ) );
+                }
+                if ( 'stopped' === $status ) {
+                        wp_send_json_error( array( 'message' => __( 'Импорт картинок остановлен.', 'beestore-integration' ) ) );
+                }
 
-                // Ищем товары с сохранёнными URL картинок, но без featured image.
+                $batch_size = isset( $_POST['batch_size'] ) ? absint( $_POST['batch_size'] ) : 10;
+                $offset     = isset( $img_state['offset'] ) ? (int) $img_state['offset'] : 0;
+
+                // Помечаем как running.
+                update_option( 'bsi_image_import_state', array(
+                        'status'   => 'running',
+                        'offset'   => $offset,
+                        'total'    => isset( $img_state['total'] ) ? $img_state['total'] : 0,
+                ), false );
+
+                // Ищем товары с сохранёнными URL картинок.
+                global $wpdb;
                 $query = new WP_Query( array(
                         'post_type'      => array( 'product', 'product_variation' ),
                         'posts_per_page' => $batch_size,
@@ -2859,7 +2949,8 @@ class BSI_Importer {
 
                 $total      = $query->found_posts;
                 $processed  = 0;
-                $success    = 0;
+                $downloaded = 0;
+                $skipped    = 0;
                 $failed     = 0;
                 $errors     = array();
 
@@ -2867,60 +2958,141 @@ class BSI_Importer {
                         $processed++;
                         $urls = get_post_meta( $product_id, '_bsi_image_urls', true );
                         if ( empty( $urls ) || ! is_array( $urls ) ) {
+                                $skipped++;
                                 continue;
                         }
 
-                        // Пропускаем если уже есть featured image.
-                        if ( has_post_thumbnail( $product_id ) ) {
-                                $success++;
-                                continue;
-                        }
-
-                        // Пытаемся скачать первую картинку.
+                        // Featured image (первая картинка).
                         $featured_url = $urls[0];
-                        $attach_id = $this->attach_image( $featured_url, $product_id, true );
+                        $thumb_id     = get_post_thumbnail_id( $product_id );
 
-                        if ( $attach_id ) {
-                                set_post_thumbnail( $product_id, $attach_id );
-                                $success++;
-
-                                // Галерея.
-                                $gallery_ids = array();
-                                $gallery_urls = array_slice( $urls, 1 );
-                                foreach ( $gallery_urls as $url ) {
-                                        $g_attach = $this->attach_image( $url, $product_id, true );
-                                        if ( $g_attach ) {
-                                                $gallery_ids[] = $g_attach;
+                        if ( ! $thumb_id ) {
+                                $attach_id = $this->attach_image( $featured_url, $product_id, true );
+                                if ( $attach_id ) {
+                                        set_post_thumbnail( $product_id, $attach_id );
+                                        $downloaded++;
+                                } else {
+                                        $failed++;
+                                        if ( count( $errors ) < 5 ) {
+                                                $errors[] = sprintf( 'Product #%d: %s', $product_id, $featured_url );
                                         }
-                                }
-                                if ( ! empty( $gallery_ids ) ) {
-                                        update_post_meta( $product_id, '_product_image_gallery', implode( ',', $gallery_ids ) );
+                                        continue;
                                 }
                         } else {
-                                $failed++;
-                                if ( count( $errors ) < 3 ) {
-                                        $errors[] = sprintf( 'Product #%d: %s', $product_id, $featured_url );
+                                $skipped++;
+                        }
+
+                        // Галерея (остальные картинки).
+                        $gallery_urls  = array_slice( $urls, 1 );
+                        $gallery_ids   = array();
+                        $existing_gallery = get_post_meta( $product_id, '_product_image_gallery', true );
+                        $existing_ids     = $existing_gallery ? array_map( 'intval', explode( ',', $existing_gallery ) ) : array();
+
+                        foreach ( $gallery_urls as $url ) {
+                                // Проверяем basename — если уже скачана, пропускаем.
+                                $basename = pathinfo( basename( parse_url( $url, PHP_URL_PATH ) ), PATHINFO_FILENAME );
+                                $existing_attach = $this->find_attachment_by_basename( $basename );
+                                if ( $existing_attach ) {
+                                        $gallery_ids[] = $existing_attach;
+                                        $skipped++;
+                                        continue;
                                 }
+                                $g_attach = $this->attach_image( $url, $product_id, true );
+                                if ( $g_attach ) {
+                                        $gallery_ids[] = $g_attach;
+                                        $downloaded++;
+                                } else {
+                                        $failed++;
+                                }
+                        }
+                        if ( ! empty( $gallery_ids ) ) {
+                                update_post_meta( $product_id, '_product_image_gallery', implode( ',', $gallery_ids ) );
                         }
                 }
 
-                $this->log( 'info', 'Backfill картинок: пачка обработана', array(
-                        'offset'    => $offset,
-                        'processed' => $processed,
-                        'success'   => $success,
-                        'failed'    => $failed,
-                        'total'     => $total,
+                $new_offset = $offset + $processed;
+                $has_more   = $new_offset < $total;
+
+                // Обновляем состояние.
+                $new_state = array(
+                        'status'   => $has_more ? 'running' : 'completed',
+                        'offset'   => $has_more ? $new_offset : 0,
+                        'total'    => $total,
+                );
+                // Накапливаем счётчики.
+                $cumulative = get_option( 'bsi_image_import_stats', array(
+                        'downloaded' => 0,
+                        'skipped'    => 0,
+                        'failed'     => 0,
+                ) );
+                $cumulative['downloaded'] += $downloaded;
+                $cumulative['skipped']    += $skipped;
+                $cumulative['failed']     += $failed;
+                update_option( 'bsi_image_import_stats', $cumulative, false );
+
+                update_option( 'bsi_image_import_state', $new_state, false );
+
+                $this->log( 'info', 'Импорт картинок: батч обработан', array(
+                        'offset'     => $offset,
+                        'processed'  => $processed,
+                        'downloaded' => $downloaded,
+                        'skipped'    => $skipped,
+                        'failed'     => $failed,
+                        'total'      => $total,
+                        'has_more'   => $has_more,
                 ) );
 
                 wp_send_json_success( array(
-                        'processed' => $processed,
-                        'success'   => $success,
-                        'failed'    => $failed,
-                        'total'     => $total,
-                        'next_offset' => $offset + $processed,
-                        'has_more'  => ( $offset + $processed ) < $total,
-                        'errors'    => $errors,
+                        'processed'  => $processed,
+                        'downloaded' => $cumulative['downloaded'],
+                        'skipped'    => $cumulative['skipped'],
+                        'failed'     => $cumulative['failed'],
+                        'total'      => $total,
+                        'next_offset' => $new_offset,
+                        'has_more'   => $has_more,
+                        'errors'     => $errors,
                 ) );
+        }
+
+        /**
+         * AJAX: пауза импорта картинок.
+         */
+        public function ajax_backfill_pause() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+                $state = get_option( 'bsi_image_import_state', array() );
+                $state['status'] = 'paused';
+                update_option( 'bsi_image_import_state', $state, false );
+                wp_send_json_success( array( 'message' => __( 'Импорт картинок на паузе.', 'beestore-integration' ) ) );
+        }
+
+        /**
+         * AJAX: продолжить импорт картинок.
+         */
+        public function ajax_backfill_resume() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+                $state = get_option( 'bsi_image_import_state', array() );
+                $state['status'] = 'running';
+                update_option( 'bsi_image_import_state', $state, false );
+                wp_send_json_success( array( 'message' => __( 'Импорт картинок продолжён.', 'beestore-integration' ) ) );
+        }
+
+        /**
+         * AJAX: остановить импорт картинок (сброс).
+         */
+        public function ajax_backfill_stop() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+                delete_option( 'bsi_image_import_state' );
+                delete_option( 'bsi_image_import_stats' );
+                wp_send_json_success( array( 'message' => __( 'Импорт картинок остановлен. Прогресс сброшен.', 'beestore-integration' ) ) );
         }
 
         /* ---------------------------------------------------------------------

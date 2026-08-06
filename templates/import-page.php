@@ -198,25 +198,48 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                 </ol>
         </div>
 
-        <!-- Докачать картинки (backfill) -->
-        <div class="bsi-card">
-                <h2><?php esc_html_e( 'Докачать картинки (backfill)', 'beestore-integration' ); ?></h2>
+        <!-- Импорт картинок -->
+        <div class="bsi-card" id="bsi-image-import-card" style="border-color:#2271b1;">
+                <h2 style="display:flex;align-items:center;gap:8px;">
+                        <span class="dashicons dashicons-images-alt2"></span>
+                        <?php esc_html_e( 'Импорт картинок', 'beestore-integration' ); ?>
+                </h2>
                 <p>
-                        <?php esc_html_e( 'Если при импорте картинки не скачивались (Sirio блокировал доступ), но URL сохранены в meta товаров — можно докачать их сейчас.', 'beestore-integration' ); ?>
+                        <?php esc_html_e( 'Скачать картинки для товаров, у которых они ещё не скачаны. URL картинок сохранены при основном импорте. Если картинка уже скачана — она будет применена без повторного скачивания. WebP конвертация выполняется по настройкам плагина.', 'beestore-integration' ); ?>
                 </p>
                 <p>
-                        <button type="button" class="button button-secondary" id="bsi-backfill-images">
+                        <button type="button" class="button button-primary" id="bsi-backfill-images">
                                 <span class="dashicons dashicons-images-alt2"></span>
-                                <?php esc_html_e( 'Докачать картинки', 'beestore-integration' ); ?>
+                                <?php esc_html_e( 'Начать импорт картинок', 'beestore-integration' ); ?>
+                        </button>
+                        <button type="button" class="button button-secondary" id="bsi-backfill-pause" style="display:none;">
+                                <span class="dashicons dashicons-controls-pause"></span>
+                                <?php esc_html_e( 'Пауза', 'beestore-integration' ); ?>
+                        </button>
+                        <button type="button" class="button button-secondary" id="bsi-backfill-resume" style="display:none;">
+                                <span class="dashicons dashicons-controls-play"></span>
+                                <?php esc_html_e( 'Продолжить', 'beestore-integration' ); ?>
+                        </button>
+                        <button type="button" class="button button-link-delete" id="bsi-backfill-stop" style="display:none;">
+                                <span class="dashicons dashicons-no-alt"></span>
+                                <?php esc_html_e( 'Остановить', 'beestore-integration' ); ?>
                         </button>
                         <span id="bsi-backfill-status" style="margin-left:10px;"></span>
                 </p>
                 <div id="bsi-backfill-progress" style="display:none;margin-top:15px;">
-                        <div class="bsi-progress-bar">
-                                <div class="bsi-progress-fill" style="width:0%"></div>
+                        <div class="bsi-progress-bar" style="background:#f0f0f1;border-radius:3px;height:24px;overflow:hidden;">
+                                <div class="bsi-progress-fill" style="background:#2271b1;height:100%;width:0%;transition:width 0.3s;"></div>
                         </div>
-                        <p style="margin-top:5px;font-size:12px;color:#666;">
+                        <p style="margin-top:8px;font-size:13px;color:#666;">
                                 <span id="bsi-backfill-counter">0 / 0</span>
+                        </p>
+                        <p style="font-size:12px;color:#666;">
+                                <?php esc_html_e( 'Скачано:', 'beestore-integration' ); ?>
+                                <strong id="bsi-backfill-downloaded">0</strong>
+                                | <?php esc_html_e( 'Уже есть:', 'beestore-integration' ); ?>
+                                <strong id="bsi-backfill-skipped">0</strong>
+                                | <?php esc_html_e( 'Ошибок:', 'beestore-integration' ); ?>
+                                <strong id="bsi-backfill-failed">0</strong>
                         </p>
                 </div>
         </div>
@@ -590,17 +613,90 @@ jQuery(document).ready(function($){
                 });
         });
 
-        // Backfill картинок.
-        var backfillOffset = 0;
+        // ─── Импорт картинок ──────────────────────────────────────────
+        var backfillRunning = false;
+
         $('#bsi-backfill-images').on('click', function(e) {
                 e.preventDefault();
-                var $btn = $(this);
-                $btn.prop('disabled', true);
+                backfillRunning = true;
+                $(this).prop('disabled', true);
+                $('#bsi-backfill-pause').show();
+                $('#bsi-backfill-stop').show();
                 $('#bsi-backfill-progress').show();
-                backfillOffset = 0;
                 $('#bsi-backfill-status').html('<span class="bsi-spinner"></span> Запуск...');
                 runBackfill();
         });
+
+        $('#bsi-backfill-pause').on('click', function(e) {
+                e.preventDefault();
+                $.post(bsiAdmin.ajaxUrl, { action: 'bsi_backfill_pause', nonce: bsiAdmin.nonce }, function() {
+                        backfillRunning = false;
+                        $('#bsi-backfill-pause').hide();
+                        $('#bsi-backfill-resume').show();
+                        $('#bsi-backfill-status').html('<span style="color:#f57c00;">⏸ На паузе</span>');
+                });
+        });
+
+        $('#bsi-backfill-resume').on('click', function(e) {
+                e.preventDefault();
+                $.post(bsiAdmin.ajaxUrl, { action: 'bsi_backfill_resume', nonce: bsiAdmin.nonce }, function() {
+                        backfillRunning = true;
+                        $('#bsi-backfill-resume').hide();
+                        $('#bsi-backfill-pause').show();
+                        $('#bsi-backfill-status').html('<span style="color:#2271b1;">▶ Продолжение...</span>');
+                        runBackfill();
+                });
+        });
+
+        $('#bsi-backfill-stop').on('click', function(e) {
+                e.preventDefault();
+                if (!confirm('<?php esc_attr_e( 'Остановить импорт картинок? Прогресс будет сброшен.', 'beestore-integration' ); ?>')) return;
+                $.post(bsiAdmin.ajaxUrl, { action: 'bsi_backfill_stop', nonce: bsiAdmin.nonce }, function() {
+                        backfillRunning = false;
+                        $('#bsi-backfill-images').prop('disabled', false);
+                        $('#bsi-backfill-pause').hide();
+                        $('#bsi-backfill-resume').hide();
+                        $('#bsi-backfill-stop').hide();
+                        $('#bsi-backfill-status').html('<span style="color:#c62828;">✗ Остановлено</span>');
+                });
+        });
+
+        function runBackfill() {
+                if (!backfillRunning) return;
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_backfill_images',
+                        nonce: bsiAdmin.nonce,
+                        batch_size: 10
+                }, function(response) {
+                        if (!backfillRunning) return;
+                        if (response.success) {
+                                var d = response.data;
+                                var percent = d.total > 0 ? Math.round((d.next_offset / d.total) * 100) : 100;
+                                $('#bsi-backfill-counter').text(d.next_offset + ' / ' + d.total + ' (' + percent + '%)');
+                                $('#bsi-backfill-progress .bsi-progress-fill').css('width', percent + '%');
+                                $('#bsi-backfill-downloaded').text(d.downloaded);
+                                $('#bsi-backfill-skipped').text(d.skipped);
+                                $('#bsi-backfill-failed').text(d.failed);
+                                $('#bsi-backfill-status').html('<span style="color:#2271b1;">▶ Идёт импорт... ' + percent + '%</span>');
+
+                                if (d.has_more) {
+                                        setTimeout(runBackfill, 500);
+                                } else {
+                                        backfillRunning = false;
+                                        $('#bsi-backfill-images').prop('disabled', false);
+                                        $('#bsi-backfill-pause').hide();
+                                        $('#bsi-backfill-stop').hide();
+                                        $('#bsi-backfill-status').html('<span style="color:#2e7d32;">✓ Готово! Скачано: ' + d.downloaded + ', пропущено: ' + d.skipped + ', ошибок: ' + d.failed + '</span>');
+                                }
+                        } else {
+                                $('#bsi-backfill-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
+                        }
+                }).fail(function() {
+                        if (!backfillRunning) return;
+                        $('#bsi-backfill-status').html('<span style="color:#c62828;">AJAX timeout, возобновление через 3 сек...</span>');
+                        setTimeout(runBackfill, 3000);
+                });
+        }
 
         // Полная очистка.
         $('#bsi-purge-all').on('click', function(e) {
@@ -671,37 +767,6 @@ jQuery(document).ready(function($){
                         $('#bsi-purge-images-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
                 });
         });
-
-        function runBackfill() {
-                $.post(bsiAdmin.ajaxUrl, {
-                        action: 'bsi_backfill_images',
-                        nonce: bsiAdmin.nonce,
-                        offset: backfillOffset,
-                        batch_size: 20
-                }, function(response) {
-                        if (response.success) {
-                                var d = response.data;
-                                $('#bsi-backfill-counter').text(d.next_offset + ' / ' + d.total);
-                                var percent = d.total > 0 ? Math.round((d.next_offset / d.total) * 100) : 100;
-                                $('.bsi-progress-fill').css('width', percent + '%');
-                                $('#bsi-backfill-status').html('<span style="color:#2e7d32;">✓ Успешно: ' + d.success + ', ошибок: ' + d.failed + '</span>');
-
-                                if (d.has_more) {
-                                        backfillOffset = d.next_offset;
-                                        runBackfill();
-                                } else {
-                                        $('#bsi-backfill-images').prop('disabled', false);
-                                        $('#bsi-backfill-status').html('<span style="color:#2e7d32;">✓ Готово! Всего: ' + d.total + ', скачано: ' + d.success + ', ошибок: ' + d.failed + '</span>');
-                                }
-                        } else {
-                                $('#bsi-backfill-images').prop('disabled', false);
-                                $('#bsi-backfill-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
-                        }
-                }).fail(function() {
-                        $('#bsi-backfill-images').prop('disabled', false);
-                        $('#bsi-backfill-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
-                });
-        }
 
         // Инициализация при загрузке страницы.
         initUI();

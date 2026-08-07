@@ -2576,26 +2576,44 @@ class BSI_Importer {
                         return $existing;
                 }
 
-                // 2. Ищем по _bsi_image_basename (без расширения) — переиспользование.
+                // 2. Ищем по _bsi_image_basename (без расширения).
                 $existing_by_name = $this->find_attachment_by_basename( $filename_without_ext );
                 if ( $existing_by_name ) {
-                        // Проверяем, что attachment реально существует (не был удалён).
                         $attach = get_post( $existing_by_name );
-                        if ( ! $attach || 'attachment' !== $attach->post_type ) {
-                                // Attachment удалён — нужно скачать заново.
-                                $this->log( 'info', 'Attachment не существует (удалён) — скачиваем заново', array(
-                                        'url'                => $url,
-                                        'attachment_id_old'  => $existing_by_name,
-                                ) );
-                        } else {
-                                // Attachment существует — просто переиспользуем БЕЗ проверки ETag.
-                                // Раньше тут был HTTP HEAD запрос к BeeStore для проверки изменения файла,
-                                // но это замедляло импорт в 10-20 раз (по 1-2 сек на каждую картинку).
-                                // Теперь: если картинка уже скачана — переиспользуем как есть.
-                                // Если нужно обновить — удали вручную через "Удалить только картинки BeeStore".
+                        if ( $attach && 'attachment' === $attach->post_type ) {
                                 update_post_meta( $existing_by_name, '_bsi_image_url', $url );
                                 $cache[ $cache_key ] = $existing_by_name;
                                 return $existing_by_name;
+                        }
+                }
+
+                // 3. ИЩЕМ ПО ФАЙЛУ НА ДИСКЕ — самый надёжный способ.
+                // Если файл 2000015777254_2.jpg уже существует в uploads — не скачиваем!
+                $upload_dir = wp_upload_dir();
+                $possible_files = array(
+                        trailingslashit( $upload_dir['path'] ) . $basename,
+                        trailingslashit( $upload_dir['basedir'] ) . $basename,
+                );
+                // Также проверяем WebP версию (если конвертация была).
+                $webp_basename = $filename_without_ext . '.webp';
+                $possible_files[] = trailingslashit( $upload_dir['path'] ) . $webp_basename;
+                $possible_files[] = trailingslashit( $upload_dir['basedir'] ) . $webp_basename;
+
+                foreach ( $possible_files as $file_path ) {
+                        if ( file_exists( $file_path ) ) {
+                                // Файл существует на диске — ищем attachment по этому файлу.
+                                $attach_id = $this->find_attachment_by_file( $file_path );
+                                if ( $attach_id ) {
+                                        update_post_meta( $attach_id, '_bsi_image_url', $url );
+                                        update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
+                                        update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
+                                        $cache[ $cache_key ] = $attach_id;
+                                        $this->log( 'info', 'Картинка найдена по файлу на диске', array(
+                                                'file' => basename( $file_path ),
+                                                'attach_id' => $attach_id,
+                                        ) );
+                                        return $attach_id;
+                                }
                         }
                 }
 
@@ -2722,6 +2740,28 @@ class BSI_Importer {
          * @param string $basename Filename без расширения (например "2000019668213_1")
          * @return int|false
          */
+        /**
+         * Найти attachment по пути к файлу на диске.
+         * Использует прямой SQL — ищет в _wp_attached_file meta.
+         */
+        private function find_attachment_by_file( $file_path ) {
+                global $wpdb;
+                // _wp_attached_file хранит относительный путь (например 2026/08/2000015777254_2.jpg).
+                $upload_dir = wp_upload_dir();
+                $relative_path = str_replace( trailingslashit( $upload_dir['basedir'] ), '', $file_path );
+
+                $found = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT pm.post_id FROM {$wpdb->postmeta} pm
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                         WHERE pm.meta_key = '_wp_attached_file' AND pm.meta_value = %s
+                         AND p.post_type = 'attachment'
+                         AND p.post_status != 'trash'
+                         LIMIT 1",
+                        $relative_path
+                ) );
+                return $found ? (int) $found : 0;
+        }
+
         private function find_attachment_by_basename( $basename ) {
                 if ( empty( $basename ) ) {
                         return false;

@@ -2587,34 +2587,29 @@ class BSI_Importer {
                         }
                 }
 
-                // 3. ИЩЕМ ПО ФАЙЛУ НА ДИСКЕ — самый надёжный способ.
-                // Если файл 2000015777254_2.jpg уже существует в uploads — не скачиваем!
-                $upload_dir = wp_upload_dir();
-                $possible_files = array(
-                        trailingslashit( $upload_dir['path'] ) . $basename,
-                        trailingslashit( $upload_dir['basedir'] ) . $basename,
-                );
-                // Также проверяем WebP версию (если конвертация была).
-                $webp_basename = $filename_without_ext . '.webp';
-                $possible_files[] = trailingslashit( $upload_dir['path'] ) . $webp_basename;
-                $possible_files[] = trailingslashit( $upload_dir['basedir'] ) . $webp_basename;
-
-                foreach ( $possible_files as $file_path ) {
-                        if ( file_exists( $file_path ) ) {
-                                // Файл существует на диске — ищем attachment по этому файлу.
-                                $attach_id = $this->find_attachment_by_file( $file_path );
-                                if ( $attach_id ) {
-                                        update_post_meta( $attach_id, '_bsi_image_url', $url );
-                                        update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
-                                        update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
-                                        $cache[ $cache_key ] = $attach_id;
-                                        $this->log( 'info', 'Картинка найдена по файлу на диске', array(
-                                                'file' => basename( $file_path ),
-                                                'attach_id' => $attach_id,
-                                        ) );
-                                        return $attach_id;
-                                }
-                        }
+                // 3. ИЩЕМ ПО _wp_attached_file ЧЕРЕЗ SQL LIKE — самый надёжный способ.
+                // WordPress хранит путь в meta _wp_attached_file (например "2026/07/2000015777254_2.jpg").
+                // Ищем по basename без расширения — найдёт в любой папке года/месяца.
+                // Также проверяем .webp (если была конвертация).
+                global $wpdb;
+                $like_pattern = '%/' . $wpdb->esc_like( $filename_without_ext ) . '.%';
+                $found_by_file = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT pm.post_id FROM {$wpdb->postmeta} pm
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                         WHERE pm.meta_key = '_wp_attached_file'
+                         AND pm.meta_value LIKE %s
+                         AND p.post_type = 'attachment'
+                         AND p.post_status != 'trash'
+                         LIMIT 1",
+                        $like_pattern
+                ) );
+                if ( $found_by_file ) {
+                        $attach_id = (int) $found_by_file;
+                        update_post_meta( $attach_id, '_bsi_image_url', $url );
+                        update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
+                        update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
+                        $cache[ $cache_key ] = $attach_id;
+                        return $attach_id;
                 }
 
                 if ( ! $download ) {

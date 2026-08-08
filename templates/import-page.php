@@ -254,9 +254,13 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                         <?php esc_html_e( 'Это действие необратимо! Используйте, если импорт пошёл криво (например, бренды создались неправильно) и хотите начать с чистого листа.', 'beestore-integration' ); ?>
                 </p>
                 <p>
-                        <button type="button" class="button button-link-delete" id="bsi-purge-all" onclick="return confirm('<?php esc_attr_e( 'Удалить ВСЕ товары BeeStore и атрибуты? Это необратимо!', 'beestore-integration' ); ?>')">
+                        <button type="button" class="button button-link-delete" id="bsi-purge-all">
                                 <span class="dashicons dashicons-trash"></span>
                                 <?php esc_html_e( 'Удалить все товары и атрибуты BeeStore', 'beestore-integration' ); ?>
+                        </button>
+                        <button type="button" class="button" id="bsi-purge-cancel" style="display:none;background:#c62828;color:#fff;border-color:#c62828;">
+                                <span class="dashicons dashicons-no-alt"></span>
+                                <?php esc_html_e( 'ОТМЕНИТЬ УДАЛЕНИЕ', 'beestore-integration' ); ?>
                         </button>
                         <span id="bsi-purge-status" style="margin-left:10px;"></span>
                 </p>
@@ -274,9 +278,13 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                         <?php esc_html_e( 'Полезно, когда накопились дубликаты (2000019154266_3.jpg, 2000019154266_3-1.jpg, 2000019154266_3-2.jpg …) или когда нужно пересоздать картинки с нуля после ошибки. Товары остаются на месте — следующий импорт заново скачает картинки.', 'beestore-integration' ); ?>
                 </p>
                 <p>
-                        <button type="button" class="button button-secondary" id="bsi-purge-images" onclick="return confirm('<?php esc_attr_e( 'Удалить все картинки BeeStore из Media Library? Это необратимо!', 'beestore-integration' ); ?>')">
+                        <button type="button" class="button button-secondary" id="bsi-purge-images">
                                 <span class="dashicons dashicons-trash"></span>
                                 <?php esc_html_e( 'Удалить только картинки BeeStore', 'beestore-integration' ); ?>
+                        </button>
+                        <button type="button" class="button" id="bsi-purge-images-cancel" style="display:none;background:#c62828;color:#fff;border-color:#c62828;">
+                                <span class="dashicons dashicons-no-alt"></span>
+                                <?php esc_html_e( 'ОТМЕНИТЬ', 'beestore-integration' ); ?>
                         </button>
                         <span id="bsi-purge-images-status" style="margin-left:10px;"></span>
                 </p>
@@ -753,17 +761,26 @@ jQuery(document).ready(function($){
         }
 
         // Полная очистка.
+        var purgeAbort = false;
         $('#bsi-purge-all').on('click', function(e) {
                 e.preventDefault();
+                if (!confirm('<?php esc_attr_e( 'ВНИМАНИЕ! Будут удалены ВСЕ товары BeeStore, атрибуты, категории. Это НЕОБРАТИМО! Вы уверены?', 'beestore-integration' ); ?>')) return;
                 var $btn = $(this);
+                purgeAbort = false;
                 $btn.prop('disabled', true);
-                $('#bsi-purge-status').html('<span class="bsi-spinner"></span> Удаление...');
+                $('#bsi-purge-cancel').show();
+                $('#bsi-purge-status').html('<span style="color:#c62828;font-weight:600;">⚠ УДАЛЕНИЕ ТОВАРОВ ИДЁТ... Нажмите ОТМЕНИТЬ чтобы остановить!</span>');
 
                 $.post(bsiAdmin.ajaxUrl, {
                         action: 'bsi_purge_all',
                         nonce: bsiAdmin.nonce
                 }, function(response) {
                         $btn.prop('disabled', false);
+                        $('#bsi-purge-cancel').hide();
+                        if (purgeAbort) {
+                                $('#bsi-purge-status').html('<span style="color:#f57c00;">⏸ Удаление отменено пользователем</span>');
+                                return;
+                        }
                         if (response.success) {
                                 $('#bsi-purge-status').html('<span style="color:#2e7d32;">✓ ' + response.data.message + '</span>');
                                 // Сбрасываем UI импорта.
@@ -791,18 +808,36 @@ jQuery(document).ready(function($){
                 });
         });
 
+        // Кнопка отмены удаления товаров.
+        $('#bsi-purge-cancel').on('click', function(e) {
+                e.preventDefault();
+                purgeAbort = true;
+                $(this).hide();
+                $('#bsi-purge-all').prop('disabled', false);
+                $('#bsi-purge-status').html('<span style="color:#f57c00;">⏸ Отмена... текущий батч доработает и остановится.</span>');
+        });
+
         // Очистка только картинок.
+        var purgeImgAbort = false;
         $('#bsi-purge-images').on('click', function(e) {
                 e.preventDefault();
+                if (!confirm('<?php esc_attr_e( 'Удалить все картинки BeeStore из Media Library? Это НЕОБРАТИМО!', 'beestore-integration' ); ?>')) return;
                 var $btn = $(this);
+                purgeImgAbort = false;
                 $btn.prop('disabled', true);
-                $('#bsi-purge-images-status').html('<span class="bsi-spinner"></span> Удаление картинок...');
+                $('#bsi-purge-images-cancel').show();
+                $('#bsi-purge-images-status').html('<span style="color:#c62828;font-weight:600;">⚠ УДАЛЕНИЕ КАРТИНОК ИДЁТ... Нажмите ОТМЕНИТЬ!</span>');
 
                 $.post(bsiAdmin.ajaxUrl, {
                         action: 'bsi_purge_images',
                         nonce: bsiAdmin.nonce
                 }, function(response) {
                         $btn.prop('disabled', false);
+                        $('#bsi-purge-images-cancel').hide();
+                        if (purgeImgAbort) {
+                                $('#bsi-purge-images-status').html('<span style="color:#f57c00;">⏸ Удаление отменено</span>');
+                                return;
+                        }
                         if (response.success) {
                                 var d = response.data;
                                 var html = '<span style="color:#2e7d32;">✓ ' + d.message + '</span>';
@@ -818,8 +853,18 @@ jQuery(document).ready(function($){
                         }
                 }).fail(function() {
                         $btn.prop('disabled', false);
+                        $('#bsi-purge-images-cancel').hide();
                         $('#bsi-purge-images-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
                 });
+        });
+
+        // Кнопка отмены удаления картинок.
+        $('#bsi-purge-images-cancel').on('click', function(e) {
+                e.preventDefault();
+                purgeImgAbort = true;
+                $(this).hide();
+                $('#bsi-purge-images').prop('disabled', false);
+                $('#bsi-purge-images-status').html('<span style="color:#f57c00;">⏸ Отмена...</span>');
         });
 
         // Инициализация при загрузке страницы.

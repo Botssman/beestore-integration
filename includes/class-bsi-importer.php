@@ -2636,26 +2636,40 @@ class BSI_Importer {
                 // Если файл 2000015777254_2.jpg уже существует в любой папке uploads —
                 // не создаём дубликат, а находим существующий attachment.
                 $upload_dir = wp_upload_dir();
-                $patterns = array(
-                        trailingslashit( $upload_dir['basedir'] ) . '*/' . $filename_without_ext . '.*',
-                        trailingslashit( $upload_dir['basedir'] ) . '*/*/' . $filename_without_ext . '.*',
-                        trailingslashit( $upload_dir['path'] ) . $filename_without_ext . '.*',
-                        trailingslashit( $upload_dir['basedir'] ) . $filename_without_ext . '.*',
-                );
-                $existing_files = array();
-                foreach ( $patterns as $pattern ) {
-                        $existing_files = array_merge( $existing_files, glob( $pattern ) );
-                }
-                $existing_files = array_unique( $existing_files );
+                $basedir = $upload_dir['basedir'];
 
-                foreach ( $existing_files as $existing_file ) {
-                        $relative = str_replace( trailingslashit( $upload_dir['basedir'] ), '', $existing_file );
+                // Ищем файл рекурсивно через RecursiveDirectoryIterator —
+                // glob не ищет рекурсивно на некоторых хостингах.
+                $existing_file = '';
+                $rii = new RecursiveIteratorIterator(
+                        new RecursiveDirectoryIterator( $basedir, RecursiveDirectoryIterator::SKIP_DOTS ),
+                        RecursiveIteratorIterator::LEAVES_ONLY
+                );
+                foreach ( $rii as $file ) {
+                        if ( $file->isFile() ) {
+                                $fname = $file->getFilename();
+                                // Проверяем по basename без расширения.
+                                $finfo = pathinfo( $fname );
+                                if ( $finfo['filename'] === $filename_without_ext ) {
+                                        $existing_file = $file->getPathname();
+                                        break;
+                                }
+                        }
+                }
+
+                if ( $existing_file ) {
+                        // Файл найден на диске — ищем attachment по basename через SQL LIKE.
                         global $wpdb;
+                        $like_pattern = '%/' . $wpdb->esc_like( $filename_without_ext ) . '.%';
                         $attach_id = $wpdb->get_var( $wpdb->prepare(
-                                "SELECT post_id FROM {$wpdb->postmeta}
-                                 WHERE meta_key = '_wp_attached_file' AND meta_value = %s
+                                "SELECT pm.post_id FROM {$wpdb->postmeta} pm
+                                 INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                                 WHERE pm.meta_key = '_wp_attached_file'
+                                 AND pm.meta_value LIKE %s
+                                 AND p.post_type = 'attachment'
+                                 AND p.post_status != 'trash'
                                  LIMIT 1",
-                                $relative
+                                $like_pattern
                         ) );
                         if ( $attach_id ) {
                                 @unlink( $tmp_file );
@@ -2666,6 +2680,9 @@ class BSI_Importer {
                                 $cache[ $cache_key ] = $attach_id;
                                 return $attach_id;
                         }
+                        // Файл на диске есть, но attachment в БД нет —
+                        // удаляем файл с диска (он осиротевший) и создаём новый attachment.
+                        @unlink( $existing_file );
                 }
 
                 // 3. Файл не существует — создаём новый attachment.

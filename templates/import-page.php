@@ -282,6 +282,10 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                                 <span class="dashicons dashicons-trash"></span>
                                 <?php esc_html_e( 'Удалить только картинки BeeStore', 'beestore-integration' ); ?>
                         </button>
+                        <button type="button" class="button button-secondary" id="bsi-purge-dup-images" style="border-color:#f57c00;color:#f57c00;">
+                                <span class="dashicons dashicons-admin-page"></span>
+                                <?php esc_html_e( 'Удалить только дубликаты картинок', 'beestore-integration' ); ?>
+                        </button>
                         <button type="button" class="button" id="bsi-purge-images-cancel" style="display:none;background:#c62828;color:#fff;border-color:#c62828;">
                                 <span class="dashicons dashicons-no-alt"></span>
                                 <?php esc_html_e( 'ОТМЕНИТЬ', 'beestore-integration' ); ?>
@@ -865,6 +869,29 @@ jQuery(document).ready(function($){
                 $(this).hide();
                 $('#bsi-purge-images').prop('disabled', false);
                 $('#bsi-purge-images-status').html('<span style="color:#f57c00;">⏸ Отмена...</span>');
+        });
+
+        // Удаление только дублей картинок.
+        $('#bsi-purge-dup-images').on('click', function(e) {
+                e.preventDefault();
+                if (!confirm('<?php esc_attr_e( 'Удалить дубликаты картинок? Останется по одной каждого изображения. Уникальные картинки НЕ будут удалены.', 'beestore-integration' ); ?>')) return;
+                var $btn = $(this);
+                $btn.prop('disabled', true);
+                $('#bsi-purge-images-status').html('<span class="bsi-spinner"></span> Поиск и удаление дублей...');
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_purge_duplicate_images',
+                        nonce: bsiAdmin.nonce
+                }, function(response) {
+                        $btn.prop('disabled', false);
+                        if (response.success) {
+                                $('#bsi-purge-images-status').html('<span style="color:#2e7d32;">✓ ' + response.data.message + '</span>');
+                        } else {
+                                $('#bsi-purge-images-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
+                        }
+                }).fail(function() {
+                        $btn.prop('disabled', false);
+                        $('#bsi-purge-images-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
+                });
         });
 
         // Инициализация при загрузке страницы.

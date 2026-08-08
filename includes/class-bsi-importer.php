@@ -58,6 +58,9 @@ class BSI_Importer {
                 // AJAX: остановить фоновый cron-импорт (сброс lock).
                 add_action( 'wp_ajax_bsi_stop_cron_import', array( $this, 'ajax_stop_cron_import' ) );
 
+                // AJAX: удалить только дубликаты картинок (оставить по одной).
+                add_action( 'wp_ajax_bsi_purge_duplicate_images', array( $this, 'ajax_purge_duplicate_images' ) );
+
                 // AJAX: получить статус фонового импорта (для индикатора).
                 add_action( 'wp_ajax_bsi_cron_import_status', array( $this, 'ajax_cron_import_status' ) );
 
@@ -846,6 +849,93 @@ class BSI_Importer {
                         'deleted'     => $deleted,
                         'failed'      => $failed,
                         'total_found' => count( $all_ids ),
+                ) );
+        }
+
+        /**
+         * AJAX: удалить только дубликаты картинок (оставить по одной каждого basename).
+         *
+         * Группирует все attachments BeeStore по _bsi_image_basename.
+         * Для каждой группы с > 1 attachment — оставляет первый (самый старый),
+         * остальные удаляет. Также проверяет по _wp_attached_file (basename файла).
+         */
+        public function ajax_purge_duplicate_images() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                global $wpdb;
+
+                // 1. Находим все attachments BeeStore и их basename.
+                $rows = $wpdb->get_results(
+                        "SELECT pm1.post_id, pm1.meta_value AS basename, pm2.meta_value AS attached_file
+                         FROM {$wpdb->postmeta} pm1
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm1.post_id AND p.post_type = 'attachment' AND p.post_status != 'trash'
+                         LEFT JOIN {$wpdb->postmeta} pm2 ON pm2.post_id = pm1.post_id AND pm2.meta_key = '_wp_attached_file'
+                         WHERE pm1.meta_key = '_bsi_image_basename'
+                         ORDER BY pm1.post_id ASC",
+                        ARRAY_A
+                );
+
+                // 2. Группируем по basename.
+                $groups = array();
+                foreach ( $rows as $row ) {
+                        $basename = $row['basename'];
+                        if ( ! $basename ) {
+                                // Если нет _bsi_image_basename — извлекаем из _wp_attached_file.
+                                if ( ! empty( $row['attached_file'] ) ) {
+                                        $basename = pathinfo( $row['attached_file'], PATHINFO_FILENAME );
+                                }
+                        }
+                        if ( $basename ) {
+                                $groups[ $basename ][] = (int) $row['post_id'];
+                        }
+                }
+
+                // 3. Для групп с > 1 attachment — удаляем дубликаты.
+                $deleted = 0;
+                $kept_groups = 0;
+                $duplicate_groups = 0;
+                foreach ( $groups as $basename => $ids ) {
+                        if ( count( $ids ) <= 1 ) {
+                                $kept_groups++;
+                                continue;
+                        }
+                        $duplicate_groups++;
+                        // Оставляем первый (самый старый, т.к. отсортировано по post_id ASC).
+                        $keep_id = $ids[0];
+                        $duplicates = array_slice( $ids, 1 );
+                        foreach ( $duplicates as $dup_id ) {
+                                wp_delete_attachment( $dup_id, true );
+                                $deleted++;
+                        }
+                }
+
+                $this->log( 'info', 'Удаление дубликатов картинок', array(
+                        'total_attachments' => count( $rows ),
+                        'unique_basenames'  => count( $groups ),
+                        'duplicate_groups'  => $duplicate_groups,
+                        'deleted'           => $deleted,
+                        'kept'              => $kept_groups,
+                ) );
+
+                wp_send_json_success( array(
+                        'message'    => sprintf(
+                                /* translators: 1: deleted, 2: groups */
+                                _n(
+                                        'Удалено дубликатов: %1$d (из %2$d групп). Уникальных картинок: %3$d.',
+                                        'Удалено дубликатов: %1$d (из %2$d групп). Уникальных картинок: %3$d.',
+                                        $deleted,
+                                        'beestore-integration'
+                                ),
+                                $deleted,
+                                $duplicate_groups,
+                                $kept_groups
+                        ),
+                        'deleted'         => $deleted,
+                        'duplicate_groups' => $duplicate_groups,
+                        'unique_images'   => $kept_groups,
                 ) );
         }
 

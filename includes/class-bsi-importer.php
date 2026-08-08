@@ -2616,32 +2616,76 @@ class BSI_Importer {
                         return 0;
                 }
 
-                // Скачиваем. Передаём description = 'BeeStore image' чтобы
-                // media_sideload_image использовала его как post_title вместо
-                // basename файла (который совпадает со SKU товара и вызывает
-                // ложные warnings "Освобождён SKU у старого товара").
-                $attach_id = media_sideload_image( $url, $product_id, 'BeeStore image', 'id' );
-                if ( is_wp_error( $attach_id ) ) {
-                        $this->log( 'warning', 'Не удалось скачать картинку', array( 'url' => $url, 'err' => $attach_id->get_error_message() ) );
+                // ─── РУЧНОЕ СКАЧИВАНИЕ вместо media_sideload_image() ──────────
+                // media_sideload_image() создаёт дубликаты файлов (-1, -2 суффиксы)
+                // потому что НЕ проверяет существование файла перед скачиванием.
+                // Мы скачиваем вручную: download_url → glob проверка → media_handle_sideload.
+
+                require_once ABSPATH . 'wp-admin/includes/file.php';
+                require_once ABSPATH . 'wp-admin/includes/media.php';
+                require_once ABSPATH . 'wp-admin/includes/image.php';
+
+                // 1. Скачиваем во временный файл.
+                $tmp_file = download_url( $url );
+                if ( is_wp_error( $tmp_file ) ) {
+                        $this->log( 'warning', 'Не удалось скачать картинку', array( 'url' => $url, 'err' => $tmp_file->get_error_message() ) );
                         return false;
                 }
 
-                // Явно задаём post_title и post_name — чтобы не совпадал со SKU.
-                wp_update_post( array(
-                        'ID'         => $attach_id,
-                        'post_title' => 'BeeStore ' . $filename_without_ext,
-                        'post_name'  => 'bsi-img-' . $filename_without_ext,
-                ) );
+                // 2. ПРОВЕРКА ФАЙЛА НА ДИСКЕ через glob — поиск по всем подпапкам.
+                // Если файл 2000015777254_2.jpg уже существует в любой папке uploads —
+                // не создаём дубликат, а находим существующий attachment.
+                $upload_dir = wp_upload_dir();
+                $patterns = array(
+                        trailingslashit( $upload_dir['basedir'] ) . '*/' . $filename_without_ext . '.*',
+                        trailingslashit( $upload_dir['basedir'] ) . '*/*/' . $filename_without_ext . '.*',
+                        trailingslashit( $upload_dir['path'] ) . $filename_without_ext . '.*',
+                        trailingslashit( $upload_dir['basedir'] ) . $filename_without_ext . '.*',
+                );
+                $existing_files = array();
+                foreach ( $patterns as $pattern ) {
+                        $existing_files = array_merge( $existing_files, glob( $pattern ) );
+                }
+                $existing_files = array_unique( $existing_files );
 
-                // Сохраняем meta.
+                foreach ( $existing_files as $existing_file ) {
+                        $relative = str_replace( trailingslashit( $upload_dir['basedir'] ), '', $existing_file );
+                        global $wpdb;
+                        $attach_id = $wpdb->get_var( $wpdb->prepare(
+                                "SELECT post_id FROM {$wpdb->postmeta}
+                                 WHERE meta_key = '_wp_attached_file' AND meta_value = %s
+                                 LIMIT 1",
+                                $relative
+                        ) );
+                        if ( $attach_id ) {
+                                @unlink( $tmp_file );
+                                $attach_id = (int) $attach_id;
+                                update_post_meta( $attach_id, '_bsi_image_url', $url );
+                                update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
+                                update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
+                                $cache[ $cache_key ] = $attach_id;
+                                return $attach_id;
+                        }
+                }
+
+                // 3. Файл не существует — создаём новый attachment.
+                $file_array = array(
+                        'name'     => $basename,
+                        'tmp_name'  => $tmp_file,
+                );
+                $attach_id = media_handle_sideload( $file_array, $product_id, 'BeeStore ' . $filename_without_ext );
+                if ( is_wp_error( $attach_id ) ) {
+                        @unlink( $tmp_file );
+                        $this->log( 'warning', 'Не удалось создать attachment', array( 'url' => $url, 'err' => $attach_id->get_error_message() ) );
+                        return false;
+                }
+
                 update_post_meta( $attach_id, '_bsi_image_url', $url );
                 update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
                 update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
 
-                // Конвертация в WebP (если включена).
                 $settings = get_option( 'bsi_settings', array() );
                 $webp_enabled = isset( $settings['webp_enabled'] ) && '1' === $settings['webp_enabled'];
-
                 if ( $webp_enabled ) {
                         $this->convert_attachment_to_webp( $attach_id );
                 }

@@ -2661,10 +2661,13 @@ class BSI_Importer {
 
                 // 1. САМЫЙ НАДЁЖНЫЙ СПОСОБ — SQL LIKE по _wp_attached_file.
                 // WordPress ВСЕГДА сохраняет _wp_attached_file при создании attachment.
-                // Даже если _bsi_image_basename не сохранилась (PHP timeout) —
-                // _wp_attached_file будет 100% сохранена.
+                // НЕ используем esc_like — потому что _ в LIKE это wildcard,
+                // который совпадает с любым символом ВКЛЮЧАЯ сам _.
+                // esc_like превращает _ в \_, что может НЕ работать на хостингах
+                // с NO_BACKSLASH_ESCAPES mode → LIKE не находит файл → дубликат.
                 global $wpdb;
-                $like_pattern = '%/' . $wpdb->esc_like( $filename_without_ext ) . '.%';
+                // Имя файла состоит из цифр и _ — нет % в имени, безопасно.
+                $like_pattern = '%/' . $filename_without_ext . '.%';
                 $found_by_file = $wpdb->get_var( $wpdb->prepare(
                         "SELECT pm.post_id FROM {$wpdb->postmeta} pm
                          INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id

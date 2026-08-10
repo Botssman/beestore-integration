@@ -2707,10 +2707,6 @@ class BSI_Importer {
                 }
 
                 // ─── РУЧНОЕ СКАЧИВАНИЕ вместо media_sideload_image() ──────────
-                // media_sideload_image() создаёт дубликаты файлов (-1, -2 суффиксы)
-                // потому что НЕ проверяет существование файла перед скачиванием.
-                // Мы скачиваем вручную: download_url → glob проверка → media_handle_sideload.
-
                 require_once ABSPATH . 'wp-admin/includes/file.php';
                 require_once ABSPATH . 'wp-admin/includes/media.php';
                 require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -2722,60 +2718,12 @@ class BSI_Importer {
                         return false;
                 }
 
-                // 2. ПРОВЕРКА ФАЙЛА НА ДИСКЕ через glob — поиск по всем подпапкам.
-                // Если файл 2000015777254_2.jpg уже существует в любой папке uploads —
-                // не создаём дубликат, а находим существующий attachment.
-                $upload_dir = wp_upload_dir();
-                $basedir = $upload_dir['basedir'];
+                // 2. Удаляем временный файл — он нам не нужен если мы прошли
+                //    все 3 SQL проверки выше. Просто создаём attachment напрямую.
+                //    БОЛЬШЕ НЕ ИЩЕМ ФАЙЛ НА ДИСКЕ через RecursiveDirectoryIterator —
+                //    это сканировало весь uploads/ при каждой картинке (5-10 сек!).
 
-                // Ищем файл рекурсивно через RecursiveDirectoryIterator —
-                // glob не ищет рекурсивно на некоторых хостингах.
-                $existing_file = '';
-                $rii = new RecursiveIteratorIterator(
-                        new RecursiveDirectoryIterator( $basedir, RecursiveDirectoryIterator::SKIP_DOTS ),
-                        RecursiveIteratorIterator::LEAVES_ONLY
-                );
-                foreach ( $rii as $file ) {
-                        if ( $file->isFile() ) {
-                                $fname = $file->getFilename();
-                                // Проверяем по basename без расширения.
-                                $finfo = pathinfo( $fname );
-                                if ( $finfo['filename'] === $filename_without_ext ) {
-                                        $existing_file = $file->getPathname();
-                                        break;
-                                }
-                        }
-                }
-
-                if ( $existing_file ) {
-                        // Файл найден на диске — ищем attachment по basename через SQL LIKE.
-                        global $wpdb;
-                        $like_pattern = '%/' . $wpdb->esc_like( $filename_without_ext ) . '.%';
-                        $attach_id = $wpdb->get_var( $wpdb->prepare(
-                                "SELECT pm.post_id FROM {$wpdb->postmeta} pm
-                                 INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
-                                 WHERE pm.meta_key = '_wp_attached_file'
-                                 AND pm.meta_value LIKE %s
-                                 AND p.post_type = 'attachment'
-                                 AND p.post_status != 'trash'
-                                 LIMIT 1",
-                                $like_pattern
-                        ) );
-                        if ( $attach_id ) {
-                                @unlink( $tmp_file );
-                                $attach_id = (int) $attach_id;
-                                update_post_meta( $attach_id, '_bsi_image_url', $url );
-                                update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
-                                update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
-                                $cache[ $cache_key ] = $attach_id;
-                                return $attach_id;
-                        }
-                        // Файл на диске есть, но attachment в БД нет —
-                        // удаляем файл с диска (он осиротевший) и создаём новый attachment.
-                        @unlink( $existing_file );
-                }
-
-                // 3. Файл не существует — создаём новый attachment.
+                // 3. Создаём новый attachment через media_handle_sideload.
                 $file_array = array(
                         'name'     => $basename,
                         'tmp_name'  => $tmp_file,

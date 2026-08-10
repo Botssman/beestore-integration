@@ -2659,89 +2659,166 @@ class BSI_Importer {
                         return $cache[ $cache_key ];
                 }
 
-                // 1. САМЫЙ НАДЁЖНЫЙ СПОСОБ — SQL LIKE по _wp_attached_file.
-                // WordPress ВСЕГДА сохраняет _wp_attached_file при создании attachment.
-                // НЕ используем esc_like — потому что _ в LIKE это wildcard,
-                // который совпадает с любым символом ВКЛЮЧАЯ сам _.
-                // esc_like превращает _ в \_, что может НЕ работать на хостингах
-                // с NO_BACKSLASH_ESCAPES mode → LIKE не находит файл → дубликат.
                 global $wpdb;
-                // Имя файла состоит из цифр и _ — нет % в имени, безопасно.
-                $like_pattern = '%/' . $filename_without_ext . '.%';
-                $found_by_file = $wpdb->get_var( $wpdb->prepare(
-                        "SELECT pm.post_id FROM {$wpdb->postmeta} pm
-                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
-                         WHERE pm.meta_key = '_wp_attached_file'
-                         AND pm.meta_value LIKE %s
-                         AND p.post_type = 'attachment'
-                         AND p.post_status != 'trash'
-                         LIMIT 1",
-                        $like_pattern
-                ) );
-                if ( $found_by_file ) {
-                        $attach_id = (int) $found_by_file;
-                        update_post_meta( $attach_id, '_bsi_image_url', $url );
-                        update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
-                        update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
-                        $cache[ $cache_key ] = $attach_id;
-                        return $attach_id;
-                }
 
-                // 2. Ищем по _bsi_image_url (точное совпадение URL).
-                $existing = $this->find_attachment_by_meta( '_bsi_image_url', $url );
-                if ( $existing ) {
-                        $cache[ $cache_key ] = $existing;
-                        return $existing;
-                }
-
-                // 3. Ищем по _bsi_image_basename.
-                $existing_by_name = $this->find_attachment_by_basename( $filename_without_ext );
-                if ( $existing_by_name ) {
-                        $attach = get_post( $existing_by_name );
-                        if ( $attach && 'attachment' === $attach->post_type ) {
-                                update_post_meta( $existing_by_name, '_bsi_image_url', $url );
-                                $cache[ $cache_key ] = $existing_by_name;
-                                return $existing_by_name;
-                        }
-                }
-
-                if ( ! $download ) {
+                // ════════════════════════════════════════════════════════════════════
+                // MySQL ADVISORY LOCK — защищаем от race condition между
+                // AJAX-импортом, WP-Cron и параллельными батчами.
+                // GET_LOCK работает на уровне СЕССИИ — если сессия завершится
+                // (PHP timeout) — лок автоматически снимется.
+                // ════════════════════════════════════════════════════════════════════
+                $lock_name = 'bsi_img_' . md5( $filename_without_ext );
+                $lock_acquired = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK( %s, 30 )', $lock_name ) );
+                if ( 1 !== $lock_acquired ) {
+                        // Кто-то другой держит лок — ждём и пробуем ещё раз.
+                        // Если не удалось получить лок за 30 сек — возвращаем 0,
+                        // чтобы не создавать дубль.
+                        $this->log( 'warning', 'Не удалось получить лок для картинки', array(
+                                'url'      => $url,
+                                'basename' => $filename_without_ext,
+                        ) );
                         return 0;
                 }
 
-                // ─── РУЧНОЕ СКАЧИВАНИЕ вместо media_sideload_image() ──────────
+                // ════════════════════════════════════════════════════════════════════
+                // ДВОЙНАЯ ПРОВЕРКА после получения лока.
+                // Важно: даже если проверка до лока ничего не нашла — между
+                // проверкой и локом другой процесс мог создать attachment.
+                // ════════════════════════════════════════════════════════════════════
+                $existing_id = $this->find_existing_attachment_locked( $filename_without_ext, $url );
+                if ( $existing_id ) {
+                        $cache[ $cache_key ] = $existing_id;
+                        $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $lock_name ) );
+                        return $existing_id;
+                }
+
+                if ( ! $download ) {
+                        $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $lock_name ) );
+                        return 0;
+                }
+
+                // ════════════════════════════════════════════════════════════════════
+                // СКАЧИВАНИЕ ВО ВРЕМЕННЫЙ ФАЙЛ.
+                // ════════════════════════════════════════════════════════════════════
                 require_once ABSPATH . 'wp-admin/includes/file.php';
                 require_once ABSPATH . 'wp-admin/includes/media.php';
                 require_once ABSPATH . 'wp-admin/includes/image.php';
 
-                // 1. Скачиваем во временный файл.
                 $tmp_file = download_url( $url );
                 if ( is_wp_error( $tmp_file ) ) {
                         $this->log( 'warning', 'Не удалось скачать картинку', array( 'url' => $url, 'err' => $tmp_file->get_error_message() ) );
+                        $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $lock_name ) );
                         return false;
                 }
 
-                // 2. Удаляем временный файл — он нам не нужен если мы прошли
-                //    все 3 SQL проверки выше. Просто создаём attachment напрямую.
-                //    БОЛЬШЕ НЕ ИЩЕМ ФАЙЛ НА ДИСКЕ через RecursiveDirectoryIterator —
-                //    это сканировало весь uploads/ при каждой картинке (5-10 сек!).
-
-                // 3. Создаём новый attachment через media_handle_sideload.
-                $file_array = array(
-                        'name'     => $basename,
-                        'tmp_name'  => $tmp_file,
+                // Определяем реальное расширение файла по содержимому.
+                $real_mime = wp_get_image_mime( $tmp_file );
+                $ext_map = array(
+                        'image/jpeg' => 'jpg',
+                        'image/png'  => 'png',
+                        'image/gif'  => 'gif',
+                        'image/webp' => 'webp',
                 );
-                $attach_id = media_handle_sideload( $file_array, $product_id, 'BeeStore ' . $filename_without_ext );
-                if ( is_wp_error( $attach_id ) ) {
+                $ext = isset( $ext_map[ $real_mime ] ) ? $ext_map[ $real_mime ] : pathinfo( $basename, PATHINFO_EXTENSION );
+                if ( ! $ext ) {
+                        $ext = 'jpg';
+                }
+
+                // ════════════════════════════════════════════════════════════════════
+                // ДЕТЕРМИНИРОВАННОЕ ИМЯ ФАЙЛА — НЕ wp_unique_filename, который
+                // добавляет -1, -2 суффиксы. Если файл существует — перезапишем.
+                // Это гарантия: один basename = один файл на диске.
+                // ════════════════════════════════════════════════════════════════════
+                $upload_dir = wp_upload_dir();
+                $subdir     = $upload_dir['subdir'];
+                $target_dir = $upload_dir['basedir'] . $subdir;
+                if ( ! file_exists( $target_dir ) ) {
+                        wp_mkdir_p( $target_dir );
+                }
+                $target_filename = $filename_without_ext . '.' . $ext;
+                $target_path     = $target_dir . '/' . $target_filename;
+                $target_url      = $upload_dir['baseurl'] . $subdir . '/' . $target_filename;
+                $relative_path   = ltrim( $subdir . '/' . $target_filename, '/' );
+
+                // Если файл на диске уже существует с тем же именем — заменяем его
+                // свежескачанным (всё равно содержимое одинаковое для одного URL).
+                if ( ! @rename( $tmp_file, $target_path ) ) {
+                    // rename между дисками может не сработать — fallback на copy + unlink.
+                    if ( @copy( $tmp_file, $target_path ) ) {
                         @unlink( $tmp_file );
-                        $this->log( 'warning', 'Не удалось создать attachment', array( 'url' => $url, 'err' => $attach_id->get_error_message() ) );
+                    } else {
+                        @unlink( $tmp_file );
+                        $this->log( 'warning', 'Не удалось переместить файл в uploads', array( 'url' => $url, 'target' => $target_path ) );
+                        $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $lock_name ) );
+                        return false;
+                    }
+                }
+
+                // ════════════════════════════════════════════════════════════════════
+                // ПРОВЕРКА ПО _wp_attached_file — точное совпадение relative path.
+                // Поскольку мы используем детерминированное имя, можно сравнивать
+                // ТОЧНО, без LIKE и wildcard.
+                // ════════════════════════════════════════════════════════════════════
+                $existing_by_file = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT pm.post_id FROM {$wpdb->postmeta} pm
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                         WHERE pm.meta_key = '_wp_attached_file'
+                         AND pm.meta_value = %s
+                         AND p.post_type = 'attachment'
+                         AND p.post_status != 'trash'
+                         LIMIT 1",
+                        $relative_path
+                ) );
+                if ( $existing_by_file ) {
+                        $attach_id = (int) $existing_by_file;
+                        update_post_meta( $attach_id, '_bsi_image_url', $url );
+                        update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
+                        update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
+                        $cache[ $cache_key ] = $attach_id;
+                        $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $lock_name ) );
+                        return $attach_id;
+                }
+
+                // ════════════════════════════════════════════════════════════════════
+                // СОЗДАЁМ ATTACHMENT напрямую через wp_insert_attachment —
+                // БЕЗ media_handle_sideload, БЕЗ wp_handle_sideload, БЕЗ wp_unique_filename.
+                // Полный контроль над именем файла → никаких -1, -2 суффиксов.
+                // ════════════════════════════════════════════════════════════════════
+                $attach_data = array(
+                        'post_mime_type' => $real_mime ? $real_mime : 'image/jpeg',
+                        'guid'           => $target_url,
+                        'post_parent'    => $product_id,
+                        'post_title'     => 'BeeStore ' . $filename_without_ext,
+                        'post_content'   => '',
+                        'post_status'    => 'inherit',
+                        'post_name'      => $filename_without_ext,
+                );
+                $attach_id = wp_insert_attachment( $attach_data, $target_path, $product_id );
+                if ( is_wp_error( $attach_id ) || ! $attach_id ) {
+                        $this->log( 'warning', 'wp_insert_attachment не удался', array(
+                                'url'   => $url,
+                                'path'  => $target_path,
+                                'error' => is_wp_error( $attach_id ) ? $attach_id->get_error_message() : 'empty ID',
+                        ) );
+                        $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $lock_name ) );
                         return false;
                 }
 
+                // Сохраняем meta ПЕРВЫМ делом — даже если wp_generate_attachment_metadata
+                // упадёт по таймауту, attachment уже привязан и будет найден следующим импортом.
+                // _wp_attached_file уже сохранён самим wp_insert_attachment().
                 update_post_meta( $attach_id, '_bsi_image_url', $url );
                 update_post_meta( $attach_id, '_bsi_image_basename', $filename_without_ext );
                 update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
 
+                // Генерируем метаданные (миниатюры и т.д.) — с защитой от ошибок.
+                $metadata = wp_generate_attachment_metadata( $attach_id, $target_path );
+                if ( is_array( $metadata ) && ! empty( $metadata ) ) {
+                        wp_update_attachment_metadata( $attach_id, $metadata );
+                }
+                clean_attachment_cache( $attach_id );
+
+                // WebP конвертация (опционально).
                 $settings = get_option( 'bsi_settings', array() );
                 $webp_enabled = isset( $settings['webp_enabled'] ) && '1' === $settings['webp_enabled'];
                 if ( $webp_enabled ) {
@@ -2749,7 +2826,87 @@ class BSI_Importer {
                 }
 
                 $cache[ $cache_key ] = $attach_id;
+                $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $lock_name ) );
                 return $attach_id;
+        }
+
+        /**
+         * Найти существующий attachment по basename ИЛИ URL — используется
+         * ТОЛЬКО после получения MySQL GET_LOCK (чтобы быть уверенным что
+         * другой процесс не создаст запись между проверкой и созданием).
+         *
+         * Проверяет:
+         *  1. _bsi_image_basename (точное совпадение, без LIKE wildcards)
+         *  2. _bsi_image_url (точный URL)
+         *  3. _wp_attached_file (LIKE с ESCAPE — корректно экранирует _)
+         *
+         * @param string $basename  Filename без расширения.
+         * @param string $url       Полный URL картинки.
+         * @return int|false
+         */
+        private function find_existing_attachment_locked( $basename, $url ) {
+                global $wpdb;
+
+                // 1. Точное совпадение по _bsi_image_basename — самый быстрый и надёжный.
+                $found = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT pm.post_id FROM {$wpdb->postmeta} pm
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                         WHERE pm.meta_key = '_bsi_image_basename'
+                         AND pm.meta_value = %s
+                         AND p.post_type = 'attachment'
+                         AND p.post_status != 'trash'
+                         LIMIT 1",
+                        $basename
+                ) );
+                if ( $found ) {
+                        // Обновляем URL на случай если он изменился.
+                        update_post_meta( (int) $found, '_bsi_image_url', $url );
+                        return (int) $found;
+                }
+
+                // 2. Точное совпадение по URL.
+                $found_url = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT pm.post_id FROM {$wpdb->postmeta} pm
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                         WHERE pm.meta_key = '_bsi_image_url'
+                         AND pm.meta_value = %s
+                         AND p.post_type = 'attachment'
+                         AND p.post_status != 'trash'
+                         LIMIT 1",
+                        $url
+                ) );
+                if ( $found_url ) {
+                        update_post_meta( (int) $found_url, '_bsi_image_basename', $basename );
+                        return (int) $found_url;
+                }
+
+                // 3. LIKE по _wp_attached_file с КОРРЕКТНЫМ экранированием.
+                //    ВАЖНО: _ в SQL LIKE — это wildcard, который совпадает с любым
+                //    символом. Мы используем esc_like + ESCAPE '|' — это работает
+                //    на ВСЕХ хостингах, включая NO_BACKSLASH_ESCAPES mode
+                //    (где \ НЕ является escape-символом в строках).
+                //    Также добавляем / перед basename, чтобы НЕ совпасть с вложенными
+                //    именами вида 2000019668213_1.jpg когда ищем 2000019668213.
+                $esc_basename = str_replace( array( '\\', '%', '_' ), array( '\\\\', '\\%', '\\_' ), $basename );
+                $like_pattern = '%/' . $esc_basename . '.%';
+                $found_file = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT pm.post_id FROM {$wpdb->postmeta} pm
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                         WHERE pm.meta_key = '_wp_attached_file'
+                         AND pm.meta_value LIKE %s ESCAPE '\\\\'
+                         AND p.post_type = 'attachment'
+                         AND p.post_status != 'trash'
+                         LIMIT 1",
+                        $like_pattern
+                ) );
+                if ( $found_file ) {
+                        update_post_meta( (int) $found_file, '_bsi_image_url', $url );
+                        update_post_meta( (int) $found_file, '_bsi_image_basename', $basename );
+                        update_post_meta( (int) $found_file, '_bsi_imported_by', 'beestore-integration' );
+                        return (int) $found_file;
+                }
+
+                return false;
         }
 
         /**

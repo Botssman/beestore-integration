@@ -2659,28 +2659,10 @@ class BSI_Importer {
                         return $cache[ $cache_key ];
                 }
 
-                // 1. Сначала ищем по meta _bsi_image_url (точное совпадение URL).
-                $existing = $this->find_attachment_by_meta( '_bsi_image_url', $url );
-                if ( $existing ) {
-                        $cache[ $cache_key ] = $existing;
-                        return $existing;
-                }
-
-                // 2. Ищем по _bsi_image_basename (без расширения).
-                $existing_by_name = $this->find_attachment_by_basename( $filename_without_ext );
-                if ( $existing_by_name ) {
-                        $attach = get_post( $existing_by_name );
-                        if ( $attach && 'attachment' === $attach->post_type ) {
-                                update_post_meta( $existing_by_name, '_bsi_image_url', $url );
-                                $cache[ $cache_key ] = $existing_by_name;
-                                return $existing_by_name;
-                        }
-                }
-
-                // 3. ИЩЕМ ПО _wp_attached_file ЧЕРЕЗ SQL LIKE — самый надёжный способ.
-                // WordPress хранит путь в meta _wp_attached_file (например "2026/07/2000015777254_2.jpg").
-                // Ищем по basename без расширения — найдёт в любой папке года/месяца.
-                // Также проверяем .webp (если была конвертация).
+                // 1. САМЫЙ НАДЁЖНЫЙ СПОСОБ — SQL LIKE по _wp_attached_file.
+                // WordPress ВСЕГДА сохраняет _wp_attached_file при создании attachment.
+                // Даже если _bsi_image_basename не сохранилась (PHP timeout) —
+                // _wp_attached_file будет 100% сохранена.
                 global $wpdb;
                 $like_pattern = '%/' . $wpdb->esc_like( $filename_without_ext ) . '.%';
                 $found_by_file = $wpdb->get_var( $wpdb->prepare(
@@ -2700,6 +2682,24 @@ class BSI_Importer {
                         update_post_meta( $attach_id, '_bsi_imported_by', 'beestore-integration' );
                         $cache[ $cache_key ] = $attach_id;
                         return $attach_id;
+                }
+
+                // 2. Ищем по _bsi_image_url (точное совпадение URL).
+                $existing = $this->find_attachment_by_meta( '_bsi_image_url', $url );
+                if ( $existing ) {
+                        $cache[ $cache_key ] = $existing;
+                        return $existing;
+                }
+
+                // 3. Ищем по _bsi_image_basename.
+                $existing_by_name = $this->find_attachment_by_basename( $filename_without_ext );
+                if ( $existing_by_name ) {
+                        $attach = get_post( $existing_by_name );
+                        if ( $attach && 'attachment' === $attach->post_type ) {
+                                update_post_meta( $existing_by_name, '_bsi_image_url', $url );
+                                $cache[ $cache_key ] = $existing_by_name;
+                                return $existing_by_name;
+                        }
                 }
 
                 if ( ! $download ) {

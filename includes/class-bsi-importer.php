@@ -61,6 +61,12 @@ class BSI_Importer {
                 // AJAX: удалить только дубликаты картинок (оставить по одной).
                 add_action( 'wp_ajax_bsi_purge_duplicate_images', array( $this, 'ajax_purge_duplicate_images' ) );
 
+                // AJAX: сканировать диск на дубликаты и orphan-файлы.
+                add_action( 'wp_ajax_bsi_scan_disk_duplicates', array( $this, 'ajax_scan_disk_duplicates' ) );
+
+                // AJAX: удалить дубликаты файлов с диска (-1, -2 суффиксы).
+                add_action( 'wp_ajax_bsi_delete_disk_duplicates', array( $this, 'ajax_delete_disk_duplicates' ) );
+
                 // AJAX: получить статус фонового импорта (для индикатора).
                 add_action( 'wp_ajax_bsi_cron_import_status', array( $this, 'ajax_cron_import_status' ) );
 
@@ -936,6 +942,242 @@ class BSI_Importer {
                         'deleted'         => $deleted,
                         'duplicate_groups' => $duplicate_groups,
                         'unique_images'   => $kept_groups,
+                ) );
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: сканировать диск на дубликаты файлов (-1, -2, -3 суффиксы).
+         *
+         * Ищет в wp-content/uploads/ файлы вида:
+         *   2000019668213_1-1.jpg, 2000019668213_1-2.jpg, ...
+         *   2000019668213_1-1.webp, 2000019668213_1-2.webp, ...
+         *
+         * Эти файлы — дубли, созданные media_handle_sideload() в старых версиях
+         * плагина (до v1.9.5). Они не удаляются через wp_delete_attachment(),
+         * потому что часто не привязаны ни к одному attachment в БД.
+         * --------------------------------------------------------------------- */
+        public function ajax_scan_disk_duplicates() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $upload_dir = wp_upload_dir();
+                $basedir = $upload_dir['basedir'];
+
+                if ( ! is_dir( $basedir ) ) {
+                        wp_send_json_error( array( 'message' => 'Директория uploads не существует.' ) );
+                }
+
+                // Получаем параметры пагинации.
+                $offset = isset( $_POST['offset'] ) ? (int) $_POST['offset'] : 0;
+                $limit  = 5000; // Сканируем по 5000 файлов за раз.
+
+                $duplicates = array();
+                $total_scanned = 0;
+                $total_size    = 0;
+                $skipped       = 0;
+
+                try {
+                        $iterator = new RecursiveIteratorIterator(
+                                new RecursiveDirectoryIterator( $basedir, FilesystemIterator::SKIP_DOTS ),
+                                RecursiveIteratorIterator::LEAVES_ONLY
+                        );
+
+                        foreach ( $iterator as $file ) {
+                                // Ограничиваем количество за один запрос (для shared hosting).
+                                if ( $total_scanned >= $limit ) {
+                                        break;
+                                }
+
+                                if ( ! $file->isFile() ) {
+                                        continue;
+                                }
+
+                                $total_scanned++;
+
+                                $filename = $file->getFilename();
+                                $path     = $file->getPathname();
+                                $size     = $file->getSize();
+
+                                // Ищем файлы вида: basename-N.ext где N — число.
+                                // Это дубли, созданные wp_unique_filename в WP.
+                                if ( preg_match( '/^(.+)-(\d+)(\.[a-zA-Z0-9]+)$/', $filename, $m ) ) {
+                                        $original_filename = $m[1] . $m[3];
+                                        $original_path     = $file->getPath() . '/' . $original_filename;
+
+                                        $duplicates[] = array(
+                                                'file'        => substr( $path, strlen( $basedir ) + 1 ),
+                                                'size'        => $size,
+                                                'size_human'  => size_format( $size ),
+                                                'has_original' => file_exists( $original_path ),
+                                        );
+                                        $total_size += $size;
+                                }
+                        }
+                } catch ( Exception $e ) {
+                        wp_send_json_error( array( 'message' => 'Ошибка сканирования: ' . $e->getMessage() ) );
+                }
+
+                // Считаем общее использование диска.
+                $total_inodes = $this->count_inodes( $basedir );
+
+                $this->log( 'info', 'Сканирование диска на дубликаты', array(
+                        'scanned'      => $total_scanned,
+                        'duplicates'   => count( $duplicates ),
+                        'duplicates_size' => $total_size,
+                ) );
+
+                wp_send_json_success( array(
+                        'scanned'        => $total_scanned,
+                        'duplicates'     => $duplicates,
+                        'duplicates_count' => count( $duplicates ),
+                        'duplicates_size'  => $total_size,
+                        'duplicates_size_human' => size_format( $total_size ),
+                        'total_inodes'   => $total_inodes,
+                        'basedir'        => $basedir,
+                        'has_more'       => $total_scanned >= $limit,
+                ) );
+        }
+
+        /**
+         * Подсчитать количество файлов в директории (рекурсивно).
+         * Кешируется в transient на 5 минут.
+         */
+        private function count_inodes( $dir ) {
+                $cache_key = 'bsi_inode_count_' . md5( $dir );
+                $cached = get_transient( $cache_key );
+                if ( false !== $cached ) {
+                        return (int) $cached;
+                }
+
+                $count = 0;
+                try {
+                        $iterator = new RecursiveIteratorIterator(
+                                new RecursiveDirectoryIterator( $dir, FilesystemIterator::SKIP_DOTS ),
+                                RecursiveIteratorIterator::LEAVES_ONLY
+                        );
+                        foreach ( $iterator as $file ) {
+                                if ( $file->isFile() ) {
+                                        $count++;
+                                }
+                        }
+                } catch ( Exception $e ) {
+                        return 0;
+                }
+
+                set_transient( $cache_key, $count, 5 * MINUTE_IN_SECONDS );
+                return $count;
+        }
+
+        /* ---------------------------------------------------------------------
+         * AJAX: удалить дубликаты файлов с диска (-1, -2 суффиксы).
+         *
+         * Принимает список файлов или удаляет все найденные.
+         * ВАЖНО: удаляет только файлы вида basename-N.ext — это дубли.
+         * Оригинал basename.ext НЕ трогается.
+         * --------------------------------------------------------------------- */
+        public function ajax_delete_disk_duplicates() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $upload_dir = wp_upload_dir();
+                $basedir = $upload_dir['basedir'];
+
+                // Список файлов для удаления (от клиента).
+                $files_to_delete = isset( $_POST['files'] ) ? (array) $_POST['files'] : array();
+                $delete_all      = isset( $_POST['delete_all'] ) && '1' === $_POST['delete_all'];
+
+                if ( empty( $files_to_delete ) && ! $delete_all ) {
+                        wp_send_json_error( array( 'message' => 'Не указаны файлы для удаления.' ) );
+                }
+
+                // Если delete_all — сначала сканируем.
+                if ( $delete_all ) {
+                        $files_to_delete = array();
+                        try {
+                                $iterator = new RecursiveIteratorIterator(
+                                        new RecursiveDirectoryIterator( $basedir, FilesystemIterator::SKIP_DOTS ),
+                                        RecursiveIteratorIterator::LEAVES_ONLY
+                                );
+                                foreach ( $iterator as $file ) {
+                                        if ( ! $file->isFile() ) {
+                                                continue;
+                                        }
+                                        $filename = $file->getFilename();
+                                        if ( preg_match( '/^(.+)-(\d+)(\.[a-zA-Z0-9]+)$/', $filename ) ) {
+                                                $files_to_delete[] = substr( $file->getPathname(), strlen( $basedir ) + 1 );
+                                        }
+                                }
+                        } catch ( Exception $e ) {
+                                wp_send_json_error( array( 'message' => 'Ошибка сканирования: ' . $e->getMessage() ) );
+                        }
+                }
+
+                $deleted = 0;
+                $failed  = 0;
+                $freed_bytes = 0;
+                $errors  = array();
+
+                foreach ( $files_to_delete as $rel_path ) {
+                        // БЕЗОПАСНОСТЬ: только файлы внутри uploads/, только дубли.
+                        $full_path = realpath( $basedir . '/' . $rel_path );
+                        if ( ! $full_path ) {
+                                $failed++;
+                                continue;
+                        }
+
+                        // Проверяем, что путь внутри basedir.
+                        if ( strpos( $full_path, realpath( $basedir ) ) !== 0 ) {
+                                $failed++;
+                                $errors[] = "Path traversal detected: $rel_path";
+                                continue;
+                        }
+
+                        $filename = basename( $full_path );
+
+                        // Проверяем, что это действительно дубликат (-N.ext).
+                        if ( ! preg_match( '/^(.+)-(\d+)(\.[a-zA-Z0-9]+)$/', $filename ) ) {
+                                $failed++;
+                                $errors[] = "Not a duplicate: $filename";
+                                continue;
+                        }
+
+                        $size = @filesize( $full_path );
+
+                        if ( @unlink( $full_path ) ) {
+                                $deleted++;
+                                $freed_bytes += $size;
+                        } else {
+                                $failed++;
+                                $errors[] = "Failed to delete: $rel_path";
+                        }
+
+                        // Лимит на один запрос — 1000 файлов (для shared hosting).
+                        if ( $deleted >= 1000 ) {
+                                break;
+                        }
+                }
+
+                // Сбрасываем кеш inode.
+                delete_transient( 'bsi_inode_count_' . md5( $basedir ) );
+
+                $this->log( 'info', 'Удаление дублей файлов с диска', array(
+                        'deleted'      => $deleted,
+                        'failed'       => $failed,
+                        'freed_bytes'  => $freed_bytes,
+                        'freed_human'  => size_format( $freed_bytes ),
+                ) );
+
+                wp_send_json_success( array(
+                        'deleted'        => $deleted,
+                        'failed'         => $failed,
+                        'freed_bytes'    => $freed_bytes,
+                        'freed_human'    => size_format( $freed_bytes ),
+                        'errors'         => array_slice( $errors, 0, 20 ),
+                        'has_more'       => $deleted >= 1000,
                 ) );
         }
 

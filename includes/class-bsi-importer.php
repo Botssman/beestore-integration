@@ -3486,6 +3486,19 @@ class BSI_Importer {
                 $batch_size = isset( $_POST['batch_size'] ) ? absint( $_POST['batch_size'] ) : 10;
                 $offset     = isset( $img_state['offset'] ) ? (int) $img_state['offset'] : 0;
 
+                // ─── Сброс статистики при новом запуске (offset = 0) ──────────
+                // Если offset = 0 и прошлый статус не "paused" — это новый запуск.
+                // Сбрасываем cumulative счётчики чтобы цифры начинались с нуля.
+                if ( 0 === $offset && 'paused' !== $status ) {
+                        delete_option( 'bsi_image_import_stats' );
+                        $cumulative_fresh = array(
+                                'downloaded' => 0,
+                                'skipped'    => 0,
+                                'failed'     => 0,
+                        );
+                        update_option( 'bsi_image_import_stats', $cumulative_fresh, false );
+                }
+
                 // Помечаем как running.
                 update_option( 'bsi_image_import_state', array(
                         'status'   => 'running',

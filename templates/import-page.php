@@ -267,89 +267,23 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
 
                 <hr style="margin:20px 0;border:none;border-top:1px solid #ddd;">
 
-                <h3 style="color:#b88000;margin-top:20px;">
-                        <span class="dashicons dashicons-images-alt2"></span>
-                        <?php esc_html_e( 'Очистка только картинок', 'beestore-integration' ); ?>
-                </h3>
-                <p>
-                        <?php esc_html_e( 'Удалить из Media Library все картинки, импортированные плагином BeeStore (по meta _bsi_imported_by и _bsi_image_basename).', 'beestore-integration' ); ?>
-                </p>
-                <p>
-                        <?php esc_html_e( 'Полезно, когда накопились дубликаты (2000019154266_3.jpg, 2000019154266_3-1.jpg, 2000019154266_3-2.jpg …) или когда нужно пересоздать картинки с нуля после ошибки. Товары остаются на месте — следующий импорт заново скачает картинки.', 'beestore-integration' ); ?>
-                </p>
-                <p>
-                        <button type="button" class="button button-secondary" id="bsi-purge-images">
-                                <span class="dashicons dashicons-trash"></span>
-                                <?php esc_html_e( 'Удалить только картинки BeeStore', 'beestore-integration' ); ?>
-                        </button>
-                        <button type="button" class="button button-secondary" id="bsi-purge-dup-images" style="border-color:#f57c00;color:#f57c00;">
-                                <span class="dashicons dashicons-admin-page"></span>
-                                <?php esc_html_e( 'Удалить только дубликаты картинок', 'beestore-integration' ); ?>
-                        </button>
-                        <button type="button" class="button" id="bsi-purge-images-cancel" style="display:none;background:#c62828;color:#fff;border-color:#c62828;">
-                                <span class="dashicons dashicons-no-alt"></span>
-                                <?php esc_html_e( 'ОТМЕНИТЬ', 'beestore-integration' ); ?>
-                        </button>
-                        <span id="bsi-purge-images-status" style="margin-left:10px;"></span>
-                </p>
-        </div>
-
-        <!-- Очистка диска: дубликаты файлов -->
-        <div class="bsi-card" style="border-left:4px solid #d63638;">
-                <h2 style="color:#d63638;">
-                        <span class="dashicons dashicons-warning"></span>
-                        <?php esc_html_e( 'Очистка диска: дубликаты файлов (-1, -2, -3)', 'beestore-integration' ); ?>
-                </h2>
-                <p>
-                        <?php esc_html_e( 'Если хостинг ругается на превышение лимита inode (файлов) — этот инструмент найдёт и удалит дубликаты файлов с суффиксами -1, -2, -3 и т.д., созданные старыми версиями плагина. Эти файлы НЕ удаляются через «Удалить только дубликаты картинок», потому что часто не привязаны ни к одной записи в БД (orphan-файлы).', 'beestore-integration' ); ?>
-                </p>
-                <p>
-                        <strong><?php esc_html_e( 'Что считается дубликатом:', 'beestore-integration' ); ?></strong>
-                        <code>2000019668213_1-1.jpg</code>, <code>2000019668213_1-2.jpg</code>, <code>2000019668213_1-3.webp</code> и т.д.
-                        &nbsp;|&nbsp;
-                        <strong><?php esc_html_e( 'Оригинал НЕ трогается:', 'beestore-integration' ); ?></strong>
-                        <code>2000019668213_1.jpg</code>
-                </p>
-
-                <table class="widefat" id="bsi-disk-stats" style="margin:10px 0;">
-                        <tr>
-                                <th><?php esc_html_e( 'Всего файлов в uploads/', 'beestore-integration' ); ?></th>
-                                <td id="bsi-total-inodes">—</td>
-                        </tr>
-                        <tr>
-                                <th><?php esc_html_e( 'Найдено дублей (-N.ext)', 'beestore-integration' ); ?></th>
-                                <td id="bsi-dup-count">—</td>
-                        </tr>
-                        <tr>
-                                <th><?php esc_html_e( 'Размер дублей', 'beestore-integration' ); ?></th>
-                                <td id="bsi-dup-size">—</td>
-                        </tr>
-                        <tr>
-                                <th><?php esc_html_e( 'Удалено за сессию', 'beestore-integration' ); ?></th>
-                                <td id="bsi-deleted-total">0</td>
-                        </tr>
-                        <tr>
-                                <th><?php esc_html_e( 'Освобождено места', 'beestore-integration' ); ?></th>
-                                <td id="bsi-freed-total">0 B</td>
-                        </tr>
-                </table>
-
-                <p>
-                        <button type="button" class="button button-secondary" id="bsi-scan-disk">
-                                <span class="dashicons dashicons-search"></span>
-                                <?php esc_html_e( 'Сканировать диск на дубли', 'beestore-integration' ); ?>
-                        </button>
-                        <button type="button" class="button" id="bsi-delete-disk-dup" style="display:none;background:#d63638;color:#fff;border-color:#d63638;">
-                                <span class="dashicons dashicons-trash"></span>
-                                <?php esc_html_e( 'УДАЛИТЬ ВСЕ ДУБЛИ С ДИСКА', 'beestore-integration' ); ?>
-                        </button>
-                        <button type="button" class="button" id="bsi-delete-disk-dup-cancel" style="display:none;">
-                                <?php esc_html_e( 'Остановить', 'beestore-integration' ); ?>
-                        </button>
-                        <span id="bsi-disk-status" style="margin-left:10px;font-weight:bold;"></span>
-                </p>
-
-                <div id="bsi-dup-preview" style="max-height:300px;overflow-y:auto;border:1px solid #ddd;padding:10px;display:none;background:#fafafa;font-family:monospace;font-size:11px;">
+                <div style="background:#fffaf3;border-left:4px solid #f57c00;padding:15px;border-radius:4px;">
+                        <h3 style="color:#f57c00;margin-top:0;">
+                                <span class="dashicons dashicons-shield"></span>
+                                <?php esc_html_e( 'Очистка картинок и диска → перенесены в «Для разработчика»', 'beestore-integration' ); ?>
+                        </h3>
+                        <p>
+                                <?php esc_html_e( 'Опасные инструменты (удаление всех картинок BeeStore, удаление дублей картинок, очистка диска от файлов с суффиксами -1/-2/-3, удаление orphan миниатюр) перенесены в отдельную вкладку с парольной защитой.', 'beestore-integration' ); ?>
+                        </p>
+                        <p>
+                                <a href="<?php echo esc_url( admin_url( 'admin.php?page=bsi-dev-zone' ) ); ?>" class="button button-secondary">
+                                        <span class="dashicons dashicons-shield"></span>
+                                        <?php esc_html_e( 'Перейти в «⚠ Для разработчика»', 'beestore-integration' ); ?>
+                                </a>
+                        </p>
+                        <p style="margin-bottom:0;color:#666;font-size:12px;">
+                                <?php esc_html_e( 'Доступ: только администраторы + дополнительный пароль. Пароль по умолчанию: beestore-dev (смените после первого входа).', 'beestore-integration' ); ?>
+                        </p>
                 </div>
         </div>
 
@@ -880,209 +814,8 @@ jQuery(document).ready(function($){
                 $('#bsi-purge-status').html('<span style="color:#f57c00;">⏸ Отмена... текущий батч доработает и остановится.</span>');
         });
 
-        // Очистка только картинок.
-        var purgeImgAbort = false;
-        $('#bsi-purge-images').on('click', function(e) {
-                e.preventDefault();
-                if (!confirm('<?php esc_attr_e( 'Удалить все картинки BeeStore из Media Library? Это НЕОБРАТИМО!', 'beestore-integration' ); ?>')) return;
-                var $btn = $(this);
-                purgeImgAbort = false;
-                $btn.prop('disabled', true);
-                $('#bsi-purge-images-cancel').show();
-                $('#bsi-purge-images-status').html('<span style="color:#c62828;font-weight:600;">⚠ УДАЛЕНИЕ КАРТИНОК ИДЁТ... Нажмите ОТМЕНИТЬ!</span>');
-
-                $.post(bsiAdmin.ajaxUrl, {
-                        action: 'bsi_purge_images',
-                        nonce: bsiAdmin.nonce
-                }, function(response) {
-                        $btn.prop('disabled', false);
-                        $('#bsi-purge-images-cancel').hide();
-                        if (purgeImgAbort) {
-                                $('#bsi-purge-images-status').html('<span style="color:#f57c00;">⏸ Удаление отменено</span>');
-                                return;
-                        }
-                        if (response.success) {
-                                var d = response.data;
-                                var html = '<span style="color:#2e7d32;">✓ ' + d.message + '</span>';
-                                if (d.failed > 0) {
-                                        html += ' <span style="color:#c62828;">(ошибок: ' + d.failed + ')</span>';
-                                }
-                                if (d.total_found === 0) {
-                                        html = '<span style="color:#666;">Картинок BeeStore не найдено — удалять нечего.</span>';
-                                }
-                                $('#bsi-purge-images-status').html(html);
-                        } else {
-                                $('#bsi-purge-images-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
-                        }
-                }).fail(function() {
-                        $btn.prop('disabled', false);
-                        $('#bsi-purge-images-cancel').hide();
-                        $('#bsi-purge-images-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
-                });
-        });
-
-        // Кнопка отмены удаления картинок.
-        $('#bsi-purge-images-cancel').on('click', function(e) {
-                e.preventDefault();
-                purgeImgAbort = true;
-                $(this).hide();
-                $('#bsi-purge-images').prop('disabled', false);
-                $('#bsi-purge-images-status').html('<span style="color:#f57c00;">⏸ Отмена...</span>');
-        });
-
-        // Удаление только дублей картинок.
-        $('#bsi-purge-dup-images').on('click', function(e) {
-                e.preventDefault();
-                if (!confirm('<?php esc_attr_e( 'Удалить дубликаты картинок? Останется по одной каждого изображения. Уникальные картинки НЕ будут удалены.', 'beestore-integration' ); ?>')) return;
-                var $btn = $(this);
-                $btn.prop('disabled', true);
-                $('#bsi-purge-images-status').html('<span class="bsi-spinner"></span> Поиск и удаление дублей...');
-                $.post(bsiAdmin.ajaxUrl, {
-                        action: 'bsi_purge_duplicate_images',
-                        nonce: bsiAdmin.nonce
-                }, function(response) {
-                        $btn.prop('disabled', false);
-                        if (response.success) {
-                                $('#bsi-purge-images-status').html('<span style="color:#2e7d32;">✓ ' + response.data.message + '</span>');
-                        } else {
-                                $('#bsi-purge-images-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
-                        }
-                }).fail(function() {
-                        $btn.prop('disabled', false);
-                        $('#bsi-purge-images-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
-                });
-        });
-
-        // ═══════════════════════════════════════════════════════════════
-        // Очистка диска: дубликаты файлов (-1, -2, -3 суффиксы).
-        // ═══════════════════════════════════════════════════════════════
-        var bsiDiskDup = {
-                deletedTotal: 0,
-                freedTotal: 0,
-                abort: false,
-        };
-
-        function bsiFormatBytes(bytes) {
-                if (bytes < 1024) return bytes + ' B';
-                if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-                if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-                return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
-        }
-
-        $('#bsi-scan-disk').on('click', function(e) {
-                e.preventDefault();
-                var $btn = $(this);
-                $btn.prop('disabled', true);
-                $('#bsi-disk-status').html('<span class="bsi-spinner"></span> Сканирование...');
-                $('#bsi-dup-preview').hide().empty();
-
-                $.post(bsiAdmin.ajaxUrl, {
-                        action: 'bsi_scan_disk_duplicates',
-                        nonce: bsiAdmin.nonce,
-                        offset: 0
-                }, function(response) {
-                        $btn.prop('disabled', false);
-                        if (response.success) {
-                                var d = response.data;
-                                $('#bsi-total-inodes').html('<strong style="color:' + (d.total_inodes > 200000 ? '#d63638' : '#2e7d32') + ';">' + d.total_inodes.toLocaleString() + '</strong> ' + (d.total_inodes > 200000 ? '⚠ превышен лимит 200k!' : ''));
-                                $('#bsi-dup-count').html('<strong style="color:' + (d.duplicates_count > 0 ? '#d63638' : '#2e7d32') + ';">' + d.duplicates_count.toLocaleString() + '</strong>');
-                                $('#bsi-dup-size').html('<strong>' + d.duplicates_size_human + '</strong>');
-
-                                if (d.duplicates_count > 0) {
-                                        $('#bsi-delete-disk-dup').show();
-                                        $('#bsi-disk-status').html('<span style="color:#d63638;">Найдено ' + d.duplicates_count + ' дублей. Можно удалить.</span>');
-
-                                        // Показываем превью (первые 100).
-                                        var html = '<strong>Превью (первые 100 файлов):</strong><br>';
-                                        var preview = d.duplicates.slice(0, 100);
-                                        for (var i = 0; i < preview.length; i++) {
-                                                var f = preview[i];
-                                                html += '<div>' + (f.has_original ? '✓' : '⚠') + ' ' + f.file + ' <em style="color:#666;">(' + f.size_human + ')</em></div>';
-                                        }
-                                        if (d.duplicates_count > 100) {
-                                                html += '<div style="margin-top:5px;color:#666;">... и ещё ' + (d.duplicates_count - 100) + ' файлов</div>';
-                                        }
-                                        $('#bsi-dup-preview').html(html).show();
-                                } else {
-                                        $('#bsi-disk-status').html('<span style="color:#2e7d32;">✓ Дубликатов не найдено!</span>');
-                                }
-
-                                if (d.has_more) {
-                                        $('#bsi-disk-status').append('<br><em style="color:#666;">Сканирование остановлено на ' + d.scanned + ' файлах. Если нужно — нажмите ещё раз.</em>');
-                                }
-                        } else {
-                                $('#bsi-disk-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
-                        }
-                }).fail(function(xhr) {
-                        $btn.prop('disabled', false);
-                        $('#bsi-disk-status').html('<span style="color:#c62828;">✗ AJAX error: ' + xhr.status + '</span>');
-                });
-        });
-
-        function bsiDeleteDiskDupBatch() {
-                if (bsiDiskDup.abort) {
-                        $('#bsi-delete-disk-dup').show().prop('disabled', false);
-                        $('#bsi-delete-disk-dup-cancel').hide();
-                        $('#bsi-disk-status').html('<span style="color:#f57c00;">⏸ Остановлено. Удалено: ' + bsiDiskDup.deletedTotal + ', освобождено: ' + bsiFormatBytes(bsiDiskDup.freedTotal) + '</span>');
-                        return;
-                }
-
-                $('#bsi-disk-status').html('<span class="bsi-spinner"></span> Удаление... (всего: ' + bsiDiskDup.deletedTotal + ', освобождено: ' + bsiFormatBytes(bsiDiskDup.freedTotal) + ')');
-
-                $.post(bsiAdmin.ajaxUrl, {
-                        action: 'bsi_delete_disk_duplicates',
-                        nonce: bsiAdmin.nonce,
-                        delete_all: '1'
-                }, function(response) {
-                        if (response.success) {
-                                var d = response.data;
-                                bsiDiskDup.deletedTotal += d.deleted;
-                                bsiDiskDup.freedTotal += d.freed_bytes;
-                                $('#bsi-deleted-total').text(bsiDiskDup.deletedTotal.toLocaleString());
-                                $('#bsi-freed-total').text(bsiFormatBytes(bsiDiskDup.freedTotal));
-
-                                if (d.has_more && !bsiDiskDup.abort) {
-                                        // Продолжаем удалять следующую партию.
-                                        setTimeout(bsiDeleteDiskDupBatch, 500);
-                                } else {
-                                        $('#bsi-delete-disk-dup').show().prop('disabled', false);
-                                        $('#bsi-delete-disk-dup-cancel').hide();
-                                        var msg = '✓ Готово! Удалено: ' + bsiDiskDup.deletedTotal + ', освобождено: ' + bsiFormatBytes(bsiDiskDup.freedTotal);
-                                        if (d.failed > 0) {
-                                                msg += '<br><em style="color:#f57c00;">Ошибок: ' + d.failed + '</em>';
-                                        }
-                                        $('#bsi-disk-status').html('<span style="color:#2e7d32;">' + msg + '</span>');
-                                        // Пересканируем.
-                                        $('#bsi-scan-disk').trigger('click');
-                                }
-                        } else {
-                                $('#bsi-delete-disk-dup').show().prop('disabled', false);
-                                $('#bsi-delete-disk-dup-cancel').hide();
-                                $('#bsi-disk-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
-                        }
-                }).fail(function(xhr) {
-                        $('#bsi-delete-disk-dup').show().prop('disabled', false);
-                        $('#bsi-delete-disk-dup-cancel').hide();
-                        $('#bsi-disk-status').html('<span style="color:#c62828;">✗ AJAX error: ' + xhr.status + '</span>');
-                });
-        }
-
-        $('#bsi-delete-disk-dup').on('click', function(e) {
-                e.preventDefault();
-                if (!confirm('<?php esc_attr_e( 'ВНИМАНИЕ! Будут удалены ВСЕ файлы вида basename-N.ext (где N — число). Оригиналы basename.ext НЕ трогаются. Это необратимо. Продолжить?', 'beestore-integration' ); ?>')) return;
-                bsiDiskDup.deletedTotal = 0;
-                bsiDiskDup.freedTotal = 0;
-                bsiDiskDup.abort = false;
-                $(this).prop('disabled', true).hide();
-                $('#bsi-delete-disk-dup-cancel').show();
-                bsiDeleteDiskDupBatch();
-        });
-
-        $('#bsi-delete-disk-dup-cancel').on('click', function(e) {
-                e.preventDefault();
-                bsiDiskDup.abort = true;
-                $(this).prop('disabled', true);
-        });
+        // Очистка только картинок и дисковые инструменты перенесены в "Для разработчика".
+        // См. templates/dev-zone-page.php
 
         // Инициализация при загрузке страницы.
         initUI();

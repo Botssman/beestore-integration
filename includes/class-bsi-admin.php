@@ -90,6 +90,19 @@ class BSI_Admin {
                         'bsi-diagnostics',
                         array( $this, 'render_diagnostics_page' )
                 );
+
+                // ⚠ Опасная зона — только для разработчика.
+                // Доступ: capability 'manage_options' + дополнительный пароль
+                // (хранится в опции bsi_dev_zone_password, по умолчанию 'beestore-dev').
+                // Пароль можно сменить на этой же странице.
+                add_submenu_page(
+                        'beestore-integration',
+                        __( '⚠ Для разработчика', 'beestore-integration' ),
+                        __( '⚠ Для разработчика', 'beestore-integration' ),
+                        'manage_options',
+                        'bsi-dev-zone',
+                        array( $this, 'render_dev_zone_page' )
+                );
         }
 
         public function enqueue_admin_assets( $hook ) {
@@ -505,5 +518,76 @@ class BSI_Admin {
                 $settings = get_option( 'bsi_settings', array() );
                 $scan     = BSI_Import_Filters::instance()->get_scan_results();
                 include BSI_PLUGIN_DIR . 'templates/filters-page.php';
+        }
+
+        /* ---------------------------------------------------------------------
+         * Страница «⚠ Для разработчика» — опасная зона с парольной защитой.
+         *
+         * Двойная защита:
+         *   1. Право 'manage_options' (только администраторы)
+         *   2. Дополнительный пароль (опция bsi_dev_zone_password)
+         *
+         * Пароль по умолчанию: 'beestore-dev' (рекомендуется сменить при первом входе)
+         * Хранится в виде hash (password_hash) в опции bsi_dev_zone_password_hash
+         * Сессия: 4 часа (через transient bsi_dev_zone_session_{user_id})
+         *
+         * Здесь находятся опасные функции:
+         *   - Очистка диска: дубликаты файлов (-1, -2, -3)
+         *   - Удаление только картинок (всех BeeStore)
+         *   - Удаление orphan attachments
+         * --------------------------------------------------------------------- */
+        public function render_dev_zone_page() {
+                // Дополнительная проверка прав — на случай если хук изменят.
+                if ( ! current_user_can( 'manage_options' ) ) {
+                        wp_die( esc_html__( 'Доступ запрещён. Требуется право manage_options.', 'beestore-integration' ) );
+                }
+
+                $user_id      = get_current_user_id();
+                $session_key  = 'bsi_dev_zone_session_' . $user_id;
+                $session      = get_transient( $session_key );
+
+                // Обработка входа/выхода/смены пароля.
+                if ( isset( $_POST['bsi_dev_action'] ) ) {
+                        check_admin_referer( 'bsi_dev_zone' );
+
+                        $action = sanitize_text_field( wp_unslash( $_POST['bsi_dev_action'] ) );
+
+                        if ( 'login' === $action ) {
+                                $password = isset( $_POST['bsi_dev_password'] ) ? wp_unslash( $_POST['bsi_dev_password'] ) : '';
+                                $hash     = get_option( 'bsi_dev_zone_password_hash', '' );
+
+                                if ( empty( $hash ) ) {
+                                        // Первый запуск — устанавливаем пароль по умолчанию.
+                                        $hash = password_hash( 'beestore-dev', PASSWORD_DEFAULT );
+                                        update_option( 'bsi_dev_zone_password_hash', $hash );
+                                }
+
+                                if ( password_verify( $password, $hash ) ) {
+                                        set_transient( $session_key, 1, 4 * HOUR_IN_SECONDS );
+                                        $session = 1;
+                                        echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( '✓ Доступ к опасной зоне разрешён. Сессия действует 4 часа.', 'beestore-integration' ) . '</p></div>';
+                                } else {
+                                        echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__( '✗ Неверный пароль.', 'beestore-integration' ) . '</p></div>';
+                                }
+                        } elseif ( 'logout' === $action ) {
+                                delete_transient( $session_key );
+                                $session = false;
+                                echo '<div class="notice notice-info is-dismissible"><p>' . esc_html__( 'Сессия закрыта.', 'beestore-integration' ) . '</p></div>';
+                        } elseif ( 'change_password' === $action ) {
+                                // Смена пароля — только если уже авторизован.
+                                if ( $session ) {
+                                        $new_pass = isset( $_POST['bsi_dev_new_password'] ) ? wp_unslash( $_POST['bsi_dev_new_password'] ) : '';
+                                        if ( strlen( $new_pass ) >= 6 ) {
+                                                $hash = password_hash( $new_pass, PASSWORD_DEFAULT );
+                                                update_option( 'bsi_dev_zone_password_hash', $hash );
+                                                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( '✓ Пароль изменён.', 'beestore-integration' ) . '</p></div>';
+                                        } else {
+                                                echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__( '✗ Пароль должен быть не менее 6 символов.', 'beestore-integration' ) . '</p></div>';
+                                        }
+                                }
+                        }
+                }
+
+                include BSI_PLUGIN_DIR . 'templates/dev-zone-page.php';
         }
 }

@@ -244,47 +244,31 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                 </div>
         </div>
 
-        <!-- Полная очистка -->
-        <div class="bsi-card" style="border-color:#c62828;">
-                <h2 style="color:#c62828;"><?php esc_html_e( '⚠ Опасная зона: полная очистка', 'beestore-integration' ); ?></h2>
+        <!-- Все опасные инструменты перенесены в "Для разработчика" -->
+        <div class="bsi-card" style="border-color:#f57c00;background:#fffaf3;">
+                <h2 style="color:#f57c00;">
+                        <span class="dashicons dashicons-shield"></span>
+                        <?php esc_html_e( '⚠ Опасные инструменты → перенесены в «Для разработчика»', 'beestore-integration' ); ?>
+                </h2>
                 <p>
-                        <?php esc_html_e( 'Удалить ВСЕ товары BeeStore (по meta _bsi_igu_articolo), все бренды, категории, цвета, размеры и другие атрибуты, созданные плагином.', 'beestore-integration' ); ?>
+                        <?php esc_html_e( 'Все опасные операции (удаление товаров, атрибутов, картинок, очистка диска) перенесены в отдельную вкладку с парольной защитой.', 'beestore-integration' ); ?>
                 </p>
-                <p style="color:#c62828;font-weight:600;">
-                        <?php esc_html_e( 'Это действие необратимо! Используйте, если импорт пошёл криво (например, бренды создались неправильно) и хотите начать с чистого листа.', 'beestore-integration' ); ?>
-                </p>
+                <ul style="list-style:disc;padding-left:20px;color:#666;">
+                        <li><?php esc_html_e( 'Удалить все товары и атрибуты BeeStore', 'beestore-integration' ); ?></li>
+                        <li><?php esc_html_e( 'Удалить все картинки BeeStore', 'beestore-integration' ); ?></li>
+                        <li><?php esc_html_e( 'Удалить только дубликаты картинок', 'beestore-integration' ); ?></li>
+                        <li><?php esc_html_e( 'Очистка диска: дубликаты файлов (-1, -2, -3)', 'beestore-integration' ); ?></li>
+                        <li><?php esc_html_e( 'Удаление orphan миниатюр WordPress', 'beestore-integration' ); ?></li>
+                </ul>
                 <p>
-                        <button type="button" class="button button-link-delete" id="bsi-purge-all">
-                                <span class="dashicons dashicons-trash"></span>
-                                <?php esc_html_e( 'Удалить все товары и атрибуты BeeStore', 'beestore-integration' ); ?>
-                        </button>
-                        <button type="button" class="button" id="bsi-purge-cancel" style="display:none;background:#c62828;color:#fff;border-color:#c62828;">
-                                <span class="dashicons dashicons-no-alt"></span>
-                                <?php esc_html_e( 'ОТМЕНИТЬ УДАЛЕНИЕ', 'beestore-integration' ); ?>
-                        </button>
-                        <span id="bsi-purge-status" style="margin-left:10px;"></span>
-                </p>
-
-                <hr style="margin:20px 0;border:none;border-top:1px solid #ddd;">
-
-                <div style="background:#fffaf3;border-left:4px solid #f57c00;padding:15px;border-radius:4px;">
-                        <h3 style="color:#f57c00;margin-top:0;">
+                        <a href="<?php echo esc_url( admin_url( 'admin.php?page=bsi-dev-zone' ) ); ?>" class="button button-primary">
                                 <span class="dashicons dashicons-shield"></span>
-                                <?php esc_html_e( 'Очистка картинок и диска → перенесены в «Для разработчика»', 'beestore-integration' ); ?>
-                        </h3>
-                        <p>
-                                <?php esc_html_e( 'Опасные инструменты (удаление всех картинок BeeStore, удаление дублей картинок, очистка диска от файлов с суффиксами -1/-2/-3, удаление orphan миниатюр) перенесены в отдельную вкладку с парольной защитой.', 'beestore-integration' ); ?>
-                        </p>
-                        <p>
-                                <a href="<?php echo esc_url( admin_url( 'admin.php?page=bsi-dev-zone' ) ); ?>" class="button button-secondary">
-                                        <span class="dashicons dashicons-shield"></span>
-                                        <?php esc_html_e( 'Перейти в «⚠ Для разработчика»', 'beestore-integration' ); ?>
-                                </a>
-                        </p>
-                        <p style="margin-bottom:0;color:#666;font-size:12px;">
-                                <?php esc_html_e( 'Доступ: только администраторы + дополнительный пароль. Пароль по умолчанию: beestore-dev (смените после первого входа).', 'beestore-integration' ); ?>
-                        </p>
-                </div>
+                                <?php esc_html_e( 'Перейти в «⚠ Для разработчика»', 'beestore-integration' ); ?>
+                        </a>
+                </p>
+                <p style="margin-bottom:0;color:#666;font-size:12px;">
+                        <?php esc_html_e( 'Доступ: только администраторы + дополнительный пароль. Пароль по умолчанию: beestore-dev (смените после первого входа).', 'beestore-integration' ); ?>
+                </p>
         </div>
 
         <!-- Последний импорт -->
@@ -757,64 +741,7 @@ jQuery(document).ready(function($){
                 });
         }
 
-        // Полная очистка.
-        var purgeAbort = false;
-        $('#bsi-purge-all').on('click', function(e) {
-                e.preventDefault();
-                if (!confirm('<?php esc_attr_e( 'ВНИМАНИЕ! Будут удалены ВСЕ товары BeeStore, атрибуты, категории. Это НЕОБРАТИМО! Вы уверены?', 'beestore-integration' ); ?>')) return;
-                var $btn = $(this);
-                purgeAbort = false;
-                $btn.prop('disabled', true);
-                $('#bsi-purge-cancel').show();
-                $('#bsi-purge-status').html('<span style="color:#c62828;font-weight:600;">⚠ УДАЛЕНИЕ ТОВАРОВ ИДЁТ... Нажмите ОТМЕНИТЬ чтобы остановить!</span>');
-
-                $.post(bsiAdmin.ajaxUrl, {
-                        action: 'bsi_purge_all',
-                        nonce: bsiAdmin.nonce
-                }, function(response) {
-                        $btn.prop('disabled', false);
-                        $('#bsi-purge-cancel').hide();
-                        if (purgeAbort) {
-                                $('#bsi-purge-status').html('<span style="color:#f57c00;">⏸ Удаление отменено пользователем</span>');
-                                return;
-                        }
-                        if (response.success) {
-                                $('#bsi-purge-status').html('<span style="color:#2e7d32;">✓ ' + response.data.message + '</span>');
-                                // Сбрасываем UI импорта.
-                                var emptyState = {
-                                        status: 'idle',
-                                        remote_name: '',
-                                        is_full_catalog: false,
-                                        total_rows: 0,
-                                        processed_rows: 0,
-                                        started_at: '',
-                                        last_update: '',
-                                        elapsed_seconds: 0,
-                                        errors_count: 0,
-                                        last_error: '',
-                                        created_products: 0,
-                                        updated_products: 0
-                                };
-                                updateUI(emptyState, 0);
-                        } else {
-                                $('#bsi-purge-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
-                        }
-                }).fail(function() {
-                        $btn.prop('disabled', false);
-                        $('#bsi-purge-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
-                });
-        });
-
-        // Кнопка отмены удаления товаров.
-        $('#bsi-purge-cancel').on('click', function(e) {
-                e.preventDefault();
-                purgeAbort = true;
-                $(this).hide();
-                $('#bsi-purge-all').prop('disabled', false);
-                $('#bsi-purge-status').html('<span style="color:#f57c00;">⏸ Отмена... текущий батч доработает и остановится.</span>');
-        });
-
-        // Очистка только картинок и дисковые инструменты перенесены в "Для разработчика".
+        // Полная очистка и все опасные инструменты перенесены в "Для разработчика".
         // См. templates/dev-zone-page.php
 
         // Инициализация при загрузке страницы.

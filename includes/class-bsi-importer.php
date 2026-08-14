@@ -1724,12 +1724,40 @@ class BSI_Importer {
 
         /* ---------------------------------------------------------------------
          * Проверить, изменился ли товар с прошлого импорта.
-         * Сравниваем: цену, скидку, остаток, название для каждой вариации.
+         * Сравниваем: картинки (если включено скачивание), цену, остаток для каждой вариации.
          * Если всё совпадает — пропускаем (return true = skip).
          * --------------------------------------------------------------------- */
         private function product_unchanged( $product_id, $variant_rows ) {
                 if ( ! $product_id ) {
                         return false; // Новый товар — не пропускаем.
+                }
+
+                // ─── Проверка картинок (только если включено скачивание) ──────
+                // Если в настройствах включено "скачивать картинки" — проверяем
+                // что у товара ЕСТЬ featured image. Если нет, но в CSV есть URL —
+                // товар считается изменённым (нужно скачать картинку).
+                // Если скачивание выключено — проверку не делаем (пропускаем товар).
+                $settings = get_option( 'bsi_settings', array() );
+                $download_images = ! isset( $settings['download_images'] ) || '1' === $settings['download_images'];
+
+                if ( $download_images ) {
+                        // Проверяем первый вариант — у всех вариантов одной модели URL одинаковые.
+                        $first_row = isset( $variant_rows[0] ) ? $variant_rows[0] : array();
+                        $has_csv_image = false;
+                        for ( $i = 1; $i <= 10; $i++ ) {
+                                if ( ! empty( $first_row[ 'URLImg' . $i ] ) ) {
+                                        $has_csv_image = true;
+                                        break;
+                                }
+                        }
+
+                        if ( $has_csv_image ) {
+                                // В CSV есть картинка — проверяем что она привязана к товару.
+                                $thumb_id = (int) get_post_thumbnail_id( $product_id );
+                                if ( ! $thumb_id ) {
+                                        return false; // Картинки нет — товар "изменён", нужно скачать.
+                                }
+                        }
                 }
 
                 foreach ( $variant_rows as $row ) {

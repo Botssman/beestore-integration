@@ -582,11 +582,13 @@ class BSI_Importer {
                                 if ( $existing_id ) {
                                         $batch_updated++;
                                         $item_name = ( ! empty( $data['parent']['DSArticoloAgg'] ) ) ? $data['parent']['DSArticoloAgg'] : ( ! empty( $data['parent']['DSArticolo'] ) ? $data['parent']['DSArticolo'] : $igu );
+                                        $reason     = $this->unchanged_reason( $existing_id, $data['variants'] );
                                         // Собираем для показа на странице импорта (живая лента).
                                         $batch_updated_items[] = array(
                                                 'igu'      => $igu,
                                                 'name'     => $item_name,
                                                 'variants' => count( $data['variants'] ),
+                                                'reason'   => $reason,
                                         );
                                         // Логируем какой именно товар обновлён — чтобы можно было
                                         // отследить что именно изменилось при повторном импорте.
@@ -594,6 +596,7 @@ class BSI_Importer {
                                                 'igu'      => $igu,
                                                 'name'     => $item_name,
                                                 'variants' => count( $data['variants'] ),
+                                                'reason'   => $reason,
                                         ) );
                                 } else {
                                         $batch_created++;
@@ -1975,6 +1978,57 @@ class BSI_Importer {
 
                 // Все вариации совпали + картинки на месте → товар не изменился.
                 return true;
+        }
+
+        /**
+         * Определить ПРИЧИНУ, почему товар считается изменённым.
+         * Используется для диагностики: показывает в ленте/логах что именно
+         * изменилось (нет карты, новая вариация, изменённая вариация, нет картинки).
+         *
+         * @param int   $product_id
+         * @param array $variant_rows
+         * @return string Удобочитаемая причина на русском.
+         */
+        private function unchanged_reason( $product_id, $variant_rows ) {
+                $map = get_post_meta( $product_id, '_bsi_data_hash', true );
+                if ( ! is_array( $map ) || empty( $map ) ) {
+                        return 'нет карты хешей (первый импорт после обновления версии)';
+                }
+
+                foreach ( $variant_rows as $row ) {
+                        $sku = isset( $row['CodArticolo'] ) ? $row['CodArticolo'] : '';
+                        if ( ! $sku ) {
+                                return 'вариант без SKU';
+                        }
+                        $current_hash = $this->compute_variant_hash( $row );
+                        if ( ! isset( $map[ $sku ] ) ) {
+                                return 'новая вариация: ' . $sku;
+                        }
+                        if ( $map[ $sku ] !== $current_hash ) {
+                                return 'изменена вариация: ' . $sku;
+                        }
+                }
+
+                // Если всё совпало — дошли сюда только из-за картинки.
+                $settings = get_option( 'bsi_settings', array() );
+                $download_images = ! isset( $settings['download_images'] ) || '1' === $settings['download_images'];
+                if ( $download_images ) {
+                        $first_row = isset( $variant_rows[0] ) ? $variant_rows[0] : array();
+                        $has_csv_image = false;
+                        for ( $i = 1; $i <= 10; $i++ ) {
+                                if ( ! empty( $first_row[ 'URLImg' . $i ] ) ) {
+                                        $has_csv_image = true;
+                                        break;
+                                }
+                        }
+                        if ( $has_csv_image ) {
+                                if ( ! (int) get_post_thumbnail_id( $product_id ) ) {
+                                        return 'нет основной картинки у товара';
+                                }
+                        }
+                }
+
+                return 'неизвестная причина';
         }
 
         /* ---------------------------------------------------------------------

@@ -413,13 +413,15 @@ jQuery(document).ready(function($){
                 var current = parseInt($count.text(), 10) || 0;
                 var newCount = current + items.length;
                 $count.text(newCount);
-                $.each(items, function(i, item) {
+                $$.each(items, function(i, item) {
                         var name = item.name || item.igu || '';
                         var safeName = $('<div>').text(name).html();
                         var safeIgu = $('<div>').text(item.igu || '').html();
                         var vcount = item.variants || 0;
+                        var safeReason = $('<div>').text(item.reason || '').html();
                         var line = '<div>🟠 <strong>' + safeName + '</strong>' +
-                                ' <small style="color:#888;">[' + safeIgu + '] • ' + vcount + ' вар.</small></div>';
+                                ' <small style="color:#888;">[' + safeIgu + '] • ' + vcount + ' вар.</small>' +
+                                (safeReason ? ' <span style="color:#b26b00;">— ' + safeReason + '</span>' : '') + '</div>';
                         $list.append($(line));
                 });
                 $list.scrollTop($list[0].scrollHeight);

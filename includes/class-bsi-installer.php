@@ -19,6 +19,8 @@ class BSI_Installer {
                 self::create_upload_dir();
                 self::register_attributes();
                 self::schedule_cron_events();
+                // Учитываем частоты из настроек (например, отключённый каталог).
+                self::reschedule_all_from_settings();
 
                 // Дефолтные опции (только если ещё не заданы).
                 if ( false === get_option( 'bsi_settings', false ) ) {
@@ -45,6 +47,7 @@ class BSI_Installer {
                                 'enable_realtime_stock' => '0',
                                 'sync_frequency'     => 'hourly',
                                 'status_sync_frequency' => 'hourly',
+                                'stock_sync_frequency' => 'disabled',
                                 'import_batch_size'  => 25,
                                 'download_images'    => '1',
                                 'delete_out_of_stock' => '0', // Если 1 — снимать с публикации товары, отсутствующие в выгрузке.
@@ -220,6 +223,9 @@ class BSI_Installer {
                 if ( ! wp_next_scheduled( 'bsi_cron_status_sync' ) ) {
                         wp_schedule_event( time() + 600, 'hourly', 'bsi_cron_status_sync' );
                 }
+                if ( ! wp_next_scheduled( 'bsi_cron_stock_sync' ) ) {
+                        wp_schedule_event( time() + 900, 'hourly', 'bsi_cron_stock_sync' );
+                }
                 if ( ! wp_next_scheduled( 'bsi_cron_process_queue' ) ) {
                         wp_schedule_event( time() + 120, 'every5min', 'bsi_cron_process_queue' );
                 }
@@ -230,11 +236,52 @@ class BSI_Installer {
         }
 
         /**
+         * Перезапланировать cron-задачу с учётом её частоты из настроек.
+         *
+         * @param string $hook  Название hook (bsi_cron_import_catalog и т.д.).
+         * @param string $list  Список интервалов, когда hook может срабатывать.
+         * @param array  $settings Настройки плагина.
+         */
+        public static function reschedule( $hook, $freq, $all_frequencies ) {
+                wp_clear_scheduled_hook( $hook );
+
+                if ( 'disabled' === $freq || ! $freq ) {
+                        return;
+                }
+                // Используем фильтр cron_schedules — берём реальный интервал.
+                $schedules = wp_get_schedules();
+                $interval  = isset( $schedules[ $freq ]['interval'] ) ? $schedules[ $freq ]['interval'] : 0;
+                if ( $interval <= 0 ) {
+                        return; // Неизвестный интервал.
+                }
+                wp_schedule_event( time() + $interval, $freq, $hook );
+        }
+
+        /**
+         * Пересоздать cron-ск положений согласно НАСТРОЙКАМ.
+         * Вызывается при сохранении настроек.
+         */
+        public static function reschedule_all_from_settings() {
+                $settings = get_option( 'bsi_settings', array() );
+
+                $freqs = array(
+                        'bsi_cron_import_catalog' => isset( $settings['sync_frequency'] ) ? $settings['sync_frequency'] : 'hourly',
+                        'bsi_cron_status_sync'   => isset( $settings['status_sync_frequency'] ) ? $settings['status_sync_frequency'] : 'hourly',
+                        'bsi_cron_stock_sync'    => isset( $settings['stock_sync_frequency'] ) ? $settings['stock_sync_frequency'] : 'disabled',
+                );
+
+                foreach ( $freqs as $hook => $freq ) {
+                        self::reschedule( $hook, $freq, $settings );
+                }
+        }
+
+        /**
          * Очистка расписаний.
          */
         private static function clear_cron_events() {
                 wp_clear_scheduled_hook( 'bsi_cron_import_catalog' );
                 wp_clear_scheduled_hook( 'bsi_cron_status_sync' );
+                wp_clear_scheduled_hook( 'bsi_cron_stock_sync' );
                 wp_clear_scheduled_hook( 'bsi_cron_process_queue' );
                 wp_clear_scheduled_hook( 'bsi_cron_refresh_rate' );
         }

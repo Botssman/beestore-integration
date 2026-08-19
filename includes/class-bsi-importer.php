@@ -37,6 +37,8 @@ class BSI_Importer {
         private function __construct() {
                 // Cron hook импорта.
                 add_action( 'bsi_cron_import_catalog', array( $this, 'cron_import' ) );
+                // Cron hook синхронизации остатков (отдельная, быстрая).
+                add_action( 'bsi_cron_stock_sync', array( $this, 'cron_stock_sync' ) );
                 // AJAX/ручной запуск.
                 add_action( 'wp_ajax_bsi_manual_import', array( $this, 'ajax_manual_import' ) );
                 // AJAX backfill картинок (докачка после разблокировки Sirio).
@@ -85,6 +87,12 @@ class BSI_Importer {
                 add_action( 'wp_ajax_bsi_backfill_resume', array( $this, 'ajax_backfill_resume' ) );
                 add_action( 'wp_ajax_bsi_backfill_stop', array( $this, 'ajax_backfill_stop' ) );
                 add_action( 'wp_ajax_bsi_backfill_status', array( $this, 'ajax_backfill_status' ) );
+
+                // AJAX: синхронизация остатков (ручная кнопка + прогресс).
+                add_action( 'wp_ajax_bsi_stock_start', array( $this, 'ajax_stock_start' ) );
+                add_action( 'wp_ajax_bsi_stock_process_batch', array( $this, 'ajax_stock_process_batch' ) );
+                add_action( 'wp_ajax_bsi_stock_stop', array( $this, 'ajax_stock_stop' ) );
+                add_action( 'wp_ajax_bsi_stock_status', array( $this, 'ajax_stock_status' ) );
         }
 
         /**
@@ -4127,6 +4135,351 @@ class BSI_Importer {
                         'next_offset'  => $offset + $processed,
                         'has_more'     => ( $offset + $processed ) < $total,
                         'errors'       => $errors,
+                );
+        }
+
+        /* ---------------------------------------------------------------------
+         * Синхронизация остатков (отдельная от импорта каталога).
+         *
+         * Берёт инкрементальный CSV с FTP, для КАЖДОЙ строки обновляет остаток
+         * (Disponibilita) у существующей вариации по SKU. Если вариации нет —
+         * создаёт её (с атрибутами и картинкой). Быстро: не трогает товар целиком.
+         * --------------------------------------------------------------------- */
+
+        /**
+         * CRON: синхронизация остатков.
+         */
+        public function cron_stock_sync() {
+                $settings = get_option( 'bsi_settings', array() );
+                $freq = isset( $settings['stock_sync_frequency'] ) ? $settings['stock_sync_frequency'] : 'disabled';
+                if ( 'disabled' === $freq || ! $freq ) {
+                        return;
+                }
+                $this->log( 'info', 'Cron: запуск синхронизации остатков' );
+                $result = $this->run_stock_sync();
+                $this->log( 'info', 'Синхронизация остатков завершена', $result );
+        }
+
+        /**
+         * AJAX: начать синхронизацию остатков (скачивает CSV, сохраняет state).
+         */
+        public function ajax_stock_start() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                // Если остаточная синхронизация уже идёт — не запускаем новую.
+                $st = get_option( 'bsi_stock_state', array() );
+                $status = isset( $st['status'] ) ? $st['status'] : 'idle';
+                if ( 'running' === $status ) {
+                        wp_send_json_error( array( 'message' => __( 'Синхронизация остатков уже идёт.', 'beestore-integration' ) ) );
+                }
+
+                // Ищем CSV (тот же механизм, что и импорт каталога).
+                $fetch = $this->get_stock_csv_item();
+                if ( is_wp_error( $fetch ) ) {
+                        wp_send_json_error( array( 'message' => $fetch->get_error_message() ) );
+                }
+                $csv_file = $fetch['csv_file'];
+                $remote   = $fetch['remote_name'];
+
+                // Считаем строки.
+                $count_result = BSI_CSV_Parser::instance()->count_lines( $csv_file );
+                $total_rows = max( 0, $count_result - 1 );
+
+                $new_state = array(
+                        'status'          => 'running',
+                        'csv_file'        => $csv_file,
+                        'remote_name'     => $remote,
+                        'total_rows'      => $total_rows,
+                        'processed_rows'  => 0,
+                        'last_offset'     => 0,
+                        'file_position'   => 0,
+                        'pending_row'     => null,
+                        'created_variations' => 0,
+                        'updated_stock'   => 0,
+                        'errors_count'    => 0,
+                );
+                update_option( 'bsi_stock_state', $new_state, false );
+
+                $this->log( 'info', 'Синхронизация остатков: старт', array(
+                        'file' => $remote,
+                        'rows' => $total_rows,
+                ) );
+
+                wp_send_json_success( array(
+                        'message' => sprintf( __( 'Синхронизация остатков запущена. Файл: %s, строк: %d', 'beestore-integration' ), $remote, $total_rows ),
+                        'state'   => $new_state,
+                ) );
+        }
+
+        /**
+         * AJAX: обработать батч синхронизации остатков.
+         */
+        public function ajax_stock_process_batch() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $st = get_option( 'bsi_stock_state', array() );
+                if ( empty( $st ) || 'running' !== ( isset( $st['status'] ) ? $st['status'] : '' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Синхронизация остатков не запущена.', 'beestore-integration' ) ) );
+                }
+
+                if ( empty( $st['csv_file'] ) || ! file_exists( $st['csv_file'] ) ) {
+                        // Если CSV не найден — ищем свежий.
+                        $fetch = $this->get_stock_csv_item();
+                        if ( is_wp_error( $fetch ) ) {
+                                wp_send_json_error( array( 'message' => $fetch->get_error_message() ) );
+                        }
+                        $st['csv_file'] = $fetch['csv_file'];
+                        $st['total_rows'] = max( 0, BSI_CSV_Parser::instance()->count_lines( $fetch['csv_file'] ) - 1 );
+                }
+
+                // Открываем CSV, читаем батч.
+                $handle = fopen( $st['csv_file'], 'rb' );
+                if ( ! $handle ) {
+                        wp_send_json_error( array( 'message' => 'Не удалось открыть CSV остатков' ) );
+                }
+                $bom = fread( $handle, 3 );
+                if ( "\xEF\xBB\xBF" !== $bom ) { fseek( $handle, 0 ); }
+                $headers = fgetcsv( $handle, 0, ',', '"' );
+                if ( ! $headers ) { fclose( $handle ); wp_send_json_error( array( 'message' => 'Empty header' ) ); }
+                $headers = array_map( 'trim', $headers );
+
+                $file_pos = isset( $st['file_position'] ) ? (int) $st['file_position'] : 0;
+                if ( $file_pos > 0 ) { fseek( $handle, $file_pos ); }
+
+                $batch_size = 100;
+                $batch_rows = array();
+                while ( ! feof( $handle ) ) {
+                        $raw = fgetcsv( $handle, 0, ',', '"' );
+                        if ( false === $raw || null === $raw ) { break; }
+                        if ( count( $raw ) < count( $headers ) ) { $raw = array_pad( $raw, count( $headers ), '' ); }
+                        if ( count( $raw ) > count( $headers ) ) { $raw = array_slice( $raw, 0, count( $headers ) ); }
+                        $batch_rows[] = array_combine( $headers, array_map( 'trim', $raw ) );
+                        if ( count( $batch_rows ) >= $batch_size ) { break; }
+                }
+                $new_file_pos = ftell( $handle );
+                fclose( $handle );
+
+                if ( empty( $batch_rows ) ) {
+                        // Конец файла — завершено.
+                        $done_state = get_option( 'bsi_stock_state', array() );
+                        $done_state['status'] = 'completed';
+                        $done_state['processed_rows'] = isset( $done_state['total_rows'] ) ? (int) $done_state['total_rows'] : 0;
+                        $done_state['file_position'] = 0;
+                        update_option( 'bsi_stock_state', $done_state, false );
+                        wp_send_json_success( array(
+                                'message'  => __( 'Синхронизация остатков завершена!', 'beestore-integration' ),
+                                'state'    => $done_state,
+                                'finished' => true,
+                        ) );
+                }
+
+                // Обрабатываем строки.
+                $updated = 0;
+                $created = 0;
+                $errors  = 0;
+                foreach ( $batch_rows as $row ) {
+                        try {
+                                $ret = $this->apply_stock_row( $row );
+                                if ( 'created' === $ret ) { $created++; }
+                                elseif ( 'updated' === $ret ) { $updated++; }
+                                else { $errors++; }
+                        } catch ( Exception $e ) {
+                                $errors++;
+                        }
+                }
+
+                $db_s = get_option( 'bsi_stock_state', array() );
+                $db_s['processed_rows'] = ( isset( $db_s['processed_rows'] ) ? (int) $db_s['processed_rows'] : 0 ) + count( $batch_rows );
+                $db_s['last_offset']    = ( isset( $db_s['last_offset'] ) ? (int) $db_s['last_offset'] : 0 ) + count( $batch_rows );
+                $db_s['file_position']  = $new_file_pos;
+                $db_s['updated_stock']  = ( isset( $db_s['updated_stock'] ) ? (int) $db_s['updated_stock'] : 0 ) + $updated;
+                $db_s['started_variations'] = ( isset( $db_s['started_variations'] ) ? (int) $db_s['started_variations'] : 0 ) + $created;
+                $db_s['errors_count']   = ( isset( $db_s['errors_count'] ) ? (int) $db_s['errors_count'] : 0 ) + $errors;
+                update_option( 'bsi_stock_state', $db_s, false );
+
+                wp_send_json_success( array(
+                        'message'  => sprintf( __( 'Остатки: обработано %d, обновлено: %d, создано вариаций: %d, ошибок: %d', 'beestore-integration' ), count( $batch_rows ), $updated, $created, $errors ),
+                        'state'    => $db_s,
+                        'finished' => false,
+                ) );
+        }
+
+        /**
+         * Обновить остаток одной строки CSV: найти вариацию по SKU (или создать)
+         * и обновить stock. Возвращает 'created' | 'updated' | 'skipped' | 'error'.
+         *
+         * @param array $row Строка CSV.
+         * @return string
+         */
+        private function apply_stock_row( $row ) {
+                $sku = isset( $row['CodArticolo'] ) ? $row['CodArticolo'] : '';
+                $stock = isset( $row['Disponibilita'] ) ? (float) $row['Disponibilita'] : 0;
+                if ( ! $sku ) {
+                        return 'error';
+                }
+
+                // Ищем вариацию по SKU.
+                $variation_id = $this->find_variation_by_sku_anywhere( $sku );
+                if ( $variation_id ) {
+                        $variation = wc_get_product( $variation_id );
+                        if ( $variation && $variation instanceof WC_Product_Variation ) {
+                                $variation->set_manage_stock( true );
+                                $variation->set_stock_quantity( $stock );
+                                $variation->set_stock_status( $stock > 0 ? 'instock' : 'outofstock' );
+                                $variation->save();
+                                return 'updated';
+                        }
+                        return 'error';
+                }
+
+                // Вариации нет — создаём через существующий механизм.
+                // Нужен родитель: ищем по IGUArticolo.
+                $igu = isset( $row['IGUArticolo'] ) ? $row['IGUArticolo'] : '';
+                $parent_id = $igu ? $this->find_product_by_meta( '_bsi_igu_articolo', $igu ) : 0;
+                if ( ! $parent_id ) {
+                        return 'error'; // Нет родителя — нельзя создать.
+                }
+                $parent = wc_get_product( $parent_id );
+                if ( ! $parent || ! ( $parent instanceof WC_Product_Variable ) ) {
+                        return 'error';
+                }
+                $existing_vars = $parent->get_children();
+                $new_var_id = $this->upsert_variation( $parent_id, $row, $existing_vars );
+                if ( $new_var_id ) {
+                        // Применяем картинку вариации.
+                        $this->apply_images( $new_var_id, $row, $parent_id );
+                        return 'created';
+                }
+                return 'error';
+        }
+
+        /**
+         * Найти вариацию по SKU в любом товаре (для быстрой синхронизации остатков).
+         * Возвращает ID вариации или 0.
+         */
+        private function find_variation_by_sku_anywhere( $sku ) {
+                global $wpdb;
+                $found = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT pm.post_id FROM {$wpdb->postmeta} pm
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                         WHERE pm.meta_key = '_sku' AND pm.meta_value = %s
+                         AND p.post_type = 'product_variation'
+                         AND p.post_status != 'trash'
+                         LIMIT 1",
+                        $sku
+                ) );
+                return $found ? (int) $found : 0;
+        }
+
+        /**
+         * AJAX: остановка синхронизации остатков.
+         */
+        public function ajax_stock_stop() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+                delete_option( 'bsi_stock_state' );
+                wp_send_json_success( array( 'message' => __( 'Синхронизация остатков остановлена.', 'beestore-integration' ) ) );
+        }
+
+        /**
+         * AJAX: статус синхронизации остатков.
+         */
+        public function ajax_stock_status() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+                $s = get_option( 'bsi_stock_state', array() );
+                $status = isset( $s['status'] ) ? $s['status'] : 'idle';
+                $percent = isset( $s['total_rows'] ) && $s['total_rows'] > 0
+                        ? round( ( ( isset( $s['processed_rows'] ) ? $s['processed_rows'] : 0 ) / $s['total_rows'] ) * 100, 1 )
+                        : 0;
+                wp_send_json_success( array(
+                        'status' => $status,
+                        'state'  => $s,
+                        'percent' => $percent,
+                ) );
+        }
+
+        /**
+         * Получить CSV для импорта остатков (переиспользует логику каталога).
+         *
+         * @return array|WP_Error
+         */
+        private function get_stock_csv_item() {
+                $upload_dir = wp_upload_dir();
+                $beestore_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore';
+                $dirs = array( 'downloads', 'extracted', 'processed', 'manual-downloads' );
+                $csvs = array();
+                foreach ( $dirs as $subdir ) {
+                        $path = $beestore_dir . '/' . $subdir;
+                        if ( is_dir( $path ) ) {
+                                $csvs = array_merge( $csvs, glob( $path . '/*.csv' ), glob( $path . '/*/*.csv' ) );
+                        }
+                }
+                if ( ! empty( $csvs ) ) {
+                        usort( $csvs, function ( $a, $b ) { return filemtime( $b ) - filemtime( $a ); } );
+                        return array( 'csv_file' => $csvs[0], 'remote_name' => basename( $csvs[0] ) );
+                }
+                return new WP_Error( 'bsi_stock_no_csv', __( 'Нет CSV-файла для синхронизации остатков.', 'beestore-integration' ) );
+        }
+
+        /**
+         * Выполнить полную синхронизацию остатков из найденного CSV (для cron).
+         *
+         * @return array Статистика.
+         */
+        public function run_stock_sync() {
+                $fetch = $this->get_stock_csv_item();
+                if ( is_wp_error( $fetch ) ) {
+                        return array( 'success' => false, 'error' => $fetch->get_error_message() );
+                }
+
+                $csv_file = $fetch['csv_file'];
+                $handle = fopen( $csv_file, 'rb' );
+                if ( ! $handle ) {
+                        return array( 'success' => false, 'error' => 'Не удалось открыть CSV' );
+                }
+                $bom = fread( $handle, 3 );
+                if ( "\xEF\xBB\xBF" !== $bom ) { fseek( $handle, 0 ); }
+                $headers = fgetcsv( $handle, 0, ',', '"' );
+                if ( ! $headers ) { fclose( $handle ); return array( 'success' => false, 'error' => 'Empty header' ); }
+                $headers = array_map( 'trim', $headers );
+
+                $updated = 0; $created = 0; $errors = 0; $processed = 0;
+
+                while ( ! feof( $handle ) ) {
+                        $raw = fgetcsv( $handle, 0, ',', '"' );
+                        if ( false === $raw || null === $raw ) { break; }
+                        if ( count( $raw ) < count( $headers ) ) { $raw = array_pad( $raw, count( $headers ), '' ); }
+                        if ( count( $raw ) > count( $headers ) ) { $raw = array_slice( $raw, 0, count( $headers ) ); }
+                        $row = array_combine( $headers, array_map( 'trim', $raw ) );
+                        $processed++;
+                        try {
+                                $r = $this->apply_stock_row( $row );
+                                if ( 'created' === $r ) { $created++; }
+                                elseif ( 'updated' === $r ) { $updated++; }
+                                else { $errors++; }
+                        } catch ( Exception $e ) {
+                                $errors++;
+                        }
+                }
+                fclose( $handle );
+
+                return array(
+                        'success'   => true,
+                        'processed' => $processed,
+                        'updated'   => $updated,
+                        'created'   => $created,
+                        'errors'    => $errors,
                 );
         }
 }

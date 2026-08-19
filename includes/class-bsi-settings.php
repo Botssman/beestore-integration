@@ -24,7 +24,21 @@ class BSI_Settings {
         private function __construct() {
                 add_action( 'admin_menu', array( $this, 'register_menu' ) );
                 add_action( 'admin_init', array( $this, 'register_settings' ) );
+
+                // При сохранении настроек — пересоздаём cron-расписания.
+                add_action( 'updated_option_bsi_settings', array( $this, 'on_settings_updated' ) );
+                add_action( 'added_option_bsi_settings', array( $this, 'on_settings_updated' ) );
+
                 add_filter( 'cron_schedules', array( $this, 'add_cron_interval' ) );
+        }
+
+        /**
+         * Вызывается после сохранения настроек — применяем частоты cron.
+         */
+        public function on_settings_updated() {
+                if ( class_exists( 'BSI_Installer' ) ) {
+                        BSI_Installer::reschedule_all_from_settings();
+                }
         }
 
         /**
@@ -184,6 +198,7 @@ class BSI_Settings {
 
                 $output['sync_frequency']        = isset( $input['sync_frequency'] ) ? sanitize_text_field( $input['sync_frequency'] ) : 'hourly';
                 $output['status_sync_frequency'] = isset( $input['status_sync_frequency'] ) ? sanitize_text_field( $input['status_sync_frequency'] ) : 'hourly';
+                $output['stock_sync_frequency']  = isset( $input['stock_sync_frequency'] ) ? sanitize_text_field( $input['stock_sync_frequency'] ) : 'disabled';
                 $output['import_batch_size']     = isset( $input['import_batch_size'] ) ? absint( $input['import_batch_size'] ) : 200;
                 $output['id_tipo_incasso_default'] = isset( $input['id_tipo_incasso_default'] ) ? absint( $input['id_tipo_incasso_default'] ) : 3;
                 $output['log_level']             = isset( $input['log_level'] ) ? sanitize_text_field( $input['log_level'] ) : 'info';

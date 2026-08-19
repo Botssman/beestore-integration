@@ -253,6 +253,44 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                 </div>
         </div>
 
+        <!-- Синхронизация остатков -->
+        <div class="bsi-card" id="bsi-stock-sync-card">
+                <h2 style="display:flex;align-items:center;gap:8px;">
+                        <span class="dashicons dashicons-update-alt"></span>
+                        <?php esc_html_e( 'Синхронизация остатков', 'beestore-integration' ); ?>
+                </h2>
+                <p>
+                        <?php esc_html_e( 'Быстро обновить остаток у вариаций из CSV (Disponibilita). Новые вариации — создаются с картинкой. Не пересоздаёт товар целиком.', 'beestore-integration' ); ?>
+                </p>
+                <p>
+                        <button type="button" class="button button-primary" id="bsi-stock-start">
+                                <span class="dashicons dashicons-update-alt"></span>
+                                <?php esc_html_e( 'Начать синхронизацию остатков', 'beestore-integration' ); ?>
+                        </button>
+                        <button type="button" class="button button-link-delete" id="bsi-stock-stop" style="display:none;">
+                                <span class="dashicons dashicons-no-alt"></span>
+                                <?php esc_html_e( 'Остановить', 'beestore-integration' ); ?>
+                        </button>
+                        <span id="bsi-stock-status" style="margin-left:10px;"></span>
+                </p>
+                <div id="bsi-stock-progress" style="display:none;margin-top:15px;">
+                        <div class="bsi-progress-bar" style="background:#f0f0f1;border-radius:3px;height:24px;overflow:hidden;">
+                                <div class="bsi-progress-fill" style="background:#2271b1;height:100%;width:0%;transition:width 0.3s;"></div>
+                        </div>
+                        <p style="margin-top:8px;font-size:13px;color:#666;">
+                                <span id="bsi-stock-counter">0 / 0</span>
+                        </p>
+                        <p style="font-size:12px;color:#666;">
+                                <?php esc_html_e( 'Обновлено:', 'beestore-integration' ); ?>
+                                <strong id="bsi-stock-updated">0</strong>
+                                | <?php esc_html_e( 'Создано вариаций:', 'beestore-integration' ); ?>
+                                <strong id="bsi-stock-created">0</strong>
+                                | <?php esc_html_e( 'Ошибок:', 'beestore-integration' ); ?>
+                                <strong id="bsi-stock-failed">0</strong>
+                        </p>
+                </div>
+        </div>
+
         <!-- Все опасные инструменты перенесены в "Для разработчика" -->
         <div class="bsi-card" style="border-color:#f57c00;background:#fffaf3;">
                 <h2 style="color:#f57c00;">
@@ -855,5 +893,112 @@ jQuery(document).ready(function($){
                         $status.html('<span style="color:#c62828;">✗ AJAX error</span>');
                 });
         });
+
+        // ─── Синхронизация остатков ──────────────────────────────────
+        var stockRunning = false;
+        var stockTimer = null;
+
+        // При загрузке — восстанавливаем статус.
+        function checkStockState() {
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_stock_status',
+                        nonce: bsiAdmin.nonce
+                }, function(response) {
+                        if (!response.success || !response.data) return;
+                        var s = response.data;
+                        if (s.status === 'running') {
+                                stockRunning = true;
+                                $('#bsi-stock-start').prop('disabled', true);
+                                $('#bsi-stock-stop').show();
+                                $('#bsi-stock-progress').show();
+                                updateStockUi(s.state, s.percent);
+                                runStockBatch();
+                        }
+                });
+        }
+        checkStockState();
+
+        $('#bsi-stock-start').on('click', function(e) {
+                e.preventDefault();
+                stockRunning = true;
+                $(this).prop('disabled', true);
+                $('#bsi-stock-stop').show();
+                $('#bsi-stock-progress').show();
+                $('#bsi-stock-status').html('<span class="spinner is-active" style="float:none;vertical-align:middle;"></span> Запуск...');
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_stock_start',
+                        nonce: bsiAdmin.nonce
+                }, function(response) {
+                        if (response.success) {
+                                $('#bsi-stock-status').html(response.data.message);
+                                runStockBatch();
+                        } else {
+                                stockRunning = false;
+                                $('#bsi-stock-start').prop('disabled', false);
+                                $('#bsi-stock-stop').hide();
+                                $('#bsi-stock-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
+                        }
+                }).fail(function() {
+                        stockRunning = false;
+                        $('#bsi-stock-start').prop('disabled', false);
+                        $('#bsi-stock-stop').hide();
+                        $('#bsi-stock-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
+                });
+        });
+
+        $('#bsi-stock-stop').on('click', function(e) {
+                e.preventDefault();
+                stockRunning = false;
+                if (stockTimer) { clearTimeout(stockTimer); stockTimer = null; }
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_stock_stop',
+                        nonce: bsiAdmin.nonce
+                }, function() {
+                        $('#bsi-stock-start').prop('disabled', false);
+                        $('#bsi-stock-stop').hide();
+                        $('#bsi-stock-progress').hide();
+                        $('#bsi-stock-status').html('<span style="color:#c62828;">✗ Остановлено</span>');
+                });
+        });
+
+        function updateStockUi(s, percent) {
+                percent = percent || 0;
+                var total = s ? (s.total_rows || 0) : 0;
+                var processed = s ? (s.processed_rows || 0) : 0;
+                $('#bsi-stock-counter').text(processed + ' / ' + total + ' (' + Math.round(percent) + '%)');
+                $('#bsi-stock-progress .bsi-progress-fill').css('width', percent + '%');
+                $('#bsi-stock-updated').text(s ? (s.updated_stock || 0) : 0);
+                $('#bsi-stock-created').text(s ? (s.started_variations || 0) : 0);
+                $('#bsi-stock-failed').text(s ? (s.errors_count || 0) : 0);
+        }
+
+        function runStockBatch() {
+                if (!stockRunning) return;
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_stock_process_batch',
+                        nonce: bsiAdmin.nonce
+                }, function(response) {
+                        if (!stockRunning) return;
+                        if (response.success) {
+                                updateStockUi(response.data.state, response.data.state ? (response.data.state.total_rows > 0 ? (response.data.state.processed_rows / response.data.state.total_rows) * 100 : 0) : 0);
+                                if (response.data.finished) {
+                                        stockRunning = false;
+                                        $('#bsi-stock-start').prop('disabled', false);
+                                        $('#bsi-stock-stop').hide();
+                                        $('#bsi-stock-status').html('<span style="color:#2e7d32;">✓ ' + response.data.message + '</span>');
+                                } else {
+                                        stockTimer = setTimeout(runStockBatch, 500);
+                                }
+                        } else {
+                                stockRunning = false;
+                                $('#bsi-stock-start').prop('disabled', false);
+                                $('#bsi-stock-stop').hide();
+                                $('#bsi-stock-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
+                        }
+                }).fail(function() {
+                        if (!stockRunning) return;
+                        stockTimer = setTimeout(runStockBatch, 3000);
+                });
+        }
 });
 </script>

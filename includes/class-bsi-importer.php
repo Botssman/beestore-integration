@@ -491,6 +491,7 @@ class BSI_Importer {
                 $batch_errors   = 0;
                 $batch_skipped  = 0;
                 $batch_last_err = '';
+                $batch_updated_items = array(); // Список обновлённых товаров (для UI).
                 foreach ( $models_in_batch as $igu => $data ) {
                         try {
                                 $row = $data['parent'];
@@ -532,6 +533,20 @@ class BSI_Importer {
                                 BSI_Import_Filters::instance()->increment_counters( $category, $brand );
                                 if ( $existing_id ) {
                                         $batch_updated++;
+                                        $item_name = ( ! empty( $data['parent']['DSArticoloAgg'] ) ) ? $data['parent']['DSArticoloAgg'] : ( ! empty( $data['parent']['DSArticolo'] ) ? $data['parent']['DSArticolo'] : $igu );
+                                        // Собираем для показа на странице импорта (живая лента).
+                                        $batch_updated_items[] = array(
+                                                'igu'      => $igu,
+                                                'name'     => $item_name,
+                                                'variants' => count( $data['variants'] ),
+                                        );
+                                        // Логируем какой именно товар обновлён — чтобы можно было
+                                        // отследить что именно изменилось при повторном импорте.
+                                        $this->log( 'info', 'Товар обновлён (повторный импорт)', array(
+                                                'igu'      => $igu,
+                                                'name'     => $item_name,
+                                                'variants' => count( $data['variants'] ),
+                                        ) );
                                 } else {
                                         $batch_created++;
                                 }
@@ -578,9 +593,10 @@ class BSI_Importer {
                                 $batch_skipped,
                                 $batch_errors
                         ),
-                        'state'    => $updated_state,
-                        'percent'  => $percent,
-                        'finished' => false,
+                        'state'       => $updated_state,
+                        'percent'     => $percent,
+                        'finished'    => false,
+                        'updated'     => $batch_updated_items, // Список обновлённых товаров за этот батч.
                 ) );
         }
 
@@ -1600,6 +1616,11 @@ class BSI_Importer {
                                 }
 
                                 $this->upsert_model( $igu_articolo, $data['parent'], $data['variants'] );
+                                // Логируем обновлённый товар.
+                                $this->log( 'info', 'Товар импортирован (legacy)', array(
+                                        'igu'  => $igu_articolo,
+                                        'name' => ( ! empty( $data['parent']['DSArticoloAgg'] ) ) ? $data['parent']['DSArticoloAgg'] : $igu_articolo,
+                                ) );
                         } catch ( Exception $e ) {
                                 $this->log( 'error', 'Ошибка импорта модели', array(
                                         'igu' => $igu_articolo,

@@ -182,6 +182,15 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                                 <h4><?php esc_html_e( 'Лог в реальном времени:', 'beestore-integration' ); ?></h4>
                                 <pre class="bsi-log-output" style="max-height:200px;overflow:auto;background:#1e1e1e;color:#0f0;padding:10px;border-radius:4px;font-size:11px;"></pre>
                         </div>
+
+                        <!-- Обновлённые товары (живая лента) -->
+                        <div id="bsi-updated-feed" style="margin-top:15px;display:none;">
+                                <h4>
+                                        <?php esc_html_e( 'Обновлённые товары:', 'beestore-integration' ); ?>
+                                        <span id="bsi-updated-feed-count" style="background:#2271b1;color:#fff;padding:2px 8px;border-radius:10px;font-size:12px;">0</span>
+                                </h4>
+                                <div id="bsi-updated-feed-list" style="max-height:250px;overflow:auto;background:#fff;border:1px solid #c3c4c7;border-radius:4px;padding:8px;font-size:12px;"></div>
+                        </div>
                 </div>
         </div>
 
@@ -394,12 +403,38 @@ jQuery(document).ready(function($){
                 $log.scrollTop($log[0].scrollHeight);
         }
 
+        // Добавить обновлённые товары в живую ленту.
+        function appendUpdatedFeed(items) {
+                if (!items || !items.length) return;
+                var $feed = $('#bsi-updated-feed');
+                var $list = $('#bsi-updated-feed-list');
+                var $count = $('#bsi-updated-feed-count');
+                $feed.show();
+                var current = parseInt($count.text(), 10) || 0;
+                var newCount = current + items.length;
+                $count.text(newCount);
+                $.each(items, function(i, item) {
+                        var name = item.name || item.igu || '';
+                        var safeName = $('<div>').text(name).html();
+                        var safeIgu = $('<div>').text(item.igu || '').html();
+                        var vcount = item.variants || 0;
+                        var line = '<div>🟠 <strong>' + safeName + '</strong>' +
+                                ' <small style="color:#888;">[' + safeIgu + '] • ' + vcount + ' вар.</small></div>';
+                        $list.append($(line));
+                });
+                $list.scrollTop($list[0].scrollHeight);
+        }
+
         // Цикл обработки батчей.
         function startBatchLoop() {
                 if (batchInterval) return;
                 importRunning = true;
                 $('#bsi-realtime-log').show();
                 $('.bsi-log-output').empty();
+                // Сбрасываем ленту обновлённых товаров при новом запуске.
+                $('#bsi-updated-feed').hide();
+                $('#bsi-updated-feed-count').text('0');
+                $('#bsi-updated-feed-list').empty();
 
                 function processNext() {
                         if (!importRunning) return;
@@ -411,6 +446,7 @@ jQuery(document).ready(function($){
                                 if (response.success) {
                                         var d = response.data;
                                         appendLog(d.message, 'info');
+                                        appendUpdatedFeed(d.updated);
                                         updateUI(d.state, d.percent);
 
                                         if (d.finished) {

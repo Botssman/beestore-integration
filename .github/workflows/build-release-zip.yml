@@ -1,0 +1,44 @@
+name: Build Release ZIP
+
+# Автоматически собирает zip-архив с правильной структурой папок
+# (верхний уровень: beestore-integration/) и прикрепляет к каждому релизу.
+#
+# ЗАЧЕМ: без этого GitHub-обновление плагина скачивало исходники с папкой
+# beestore-integration-1.9.12/ (с версией) → путь до главного файла менялся
+# → WordPress деактивировал плагин. Теперь апдейтер берёт zip из релиза,
+# в котором папка называется просто beestore-integration/ — плагин не
+# деактивируется при обновлении.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Get tag name
+        id: tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build ZIP (folder beestore-integration/)
+        run: |
+          mkdir -p dist
+          # Копируем содержимое репозитория (кроме .git) в папку beestore-integration/
+          rsync -a --exclude='.git' --exclude='.github' --exclude='dist' ./ dist/beestore-integration/
+          cd dist
+          zip -r "../beestore-integration-${{ steps.tag.outputs.VERSION }}.zip" beestore-integration
+          cd ..
+
+      - name: Upload asset to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.tag.outputs.VERSION }}" "beestore-integration-${{ steps.tag.outputs.VERSION }}.zip" --clobber

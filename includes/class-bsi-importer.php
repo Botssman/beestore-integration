@@ -142,6 +142,7 @@ class BSI_Importer {
                         'batch_size'      => 50,
                         'created_products' => 0,
                         'updated_products' => 0,
+                        'skipped_products' => 0,
                 );
                 return wp_parse_args( $state, $defaults );
         }
@@ -287,8 +288,9 @@ class BSI_Importer {
                         'errors_count'    => 0,
                         'last_error'      => '',
                         'batch_size'      => $batch_size,
-                        'created_products' => 0,
-                        'updated_products' => 0,
+                        'created_products'  => 0,
+                        'updated_products'  => 0,
+                        'skipped_products'  => 0,
                 );
                 $this->save_import_state( $new_state );
 
@@ -557,6 +559,7 @@ class BSI_Importer {
                         'last_error'       => $batch_last_err ?: $db_state['last_error'],
                         'created_products' => $db_state['created_products'] + $batch_created,
                         'updated_products' => $db_state['updated_products'] + $batch_updated,
+                        'skipped_products' => $db_state['skipped_products'] + $batch_skipped,
                 ));
 
                 $updated_state = $this->get_import_state();
@@ -566,13 +569,14 @@ class BSI_Importer {
 
                 wp_send_json_success( array(
                         'message'  => sprintf(
-                                __( 'Обработано: %d / %d (%.1f%%). Создано: %d, обновлено: %d, ошибок: %d', 'beestore-integration' ),
+                                __( 'Обработано: %d / %d (%.1f%%). Создано: %d, обновлено: %d, пропущено: %d, ошибок: %d', 'beestore-integration' ),
                                 $updated_state['processed_rows'],
                                 $updated_state['total_rows'],
                                 $percent,
-                                $created,
-                                $updated,
-                                $errors
+                                $batch_created,
+                                $batch_updated,
+                                $batch_skipped,
+                                $batch_errors
                         ),
                         'state'    => $updated_state,
                         'percent'  => $percent,
@@ -1575,11 +1579,26 @@ class BSI_Importer {
         /**
          * Обработать пачку моделей (parent + variants) и записать в WC.
          *
+         * Теперь также проверяет через product_unchanged() — неизменённые товары
+         * целиком пропускаются, без загрузки/сохранения в WooCommerce.
+         *
          * @param array $models Ассоциативный массив: IGUArticolo => [parent, variants].
          */
         private function process_models_batch( $models ) {
                 foreach ( $models as $igu_articolo => $data ) {
                         try {
+                                // ─── Проверка: изменился ли товар ─────────────────────
+                                // Если товар уже существует и данные не изменились —
+                                // полностью пропускаем, без каких-либо операций WC.
+                                $existing_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu_articolo );
+                                if ( $existing_id && $this->product_unchanged( $existing_id, $data['variants'] ) ) {
+                                        BSI_Import_Filters::instance()->increment_counters(
+                                                $this->extract_category( $data['parent'] ),
+                                                $this->extract_brand( $data['parent'] )
+                                        );
+                                        continue;
+                                }
+
                                 $this->upsert_model( $igu_articolo, $data['parent'], $data['variants'] );
                         } catch ( Exception $e ) {
                                 $this->log( 'error', 'Ошибка импорта модели', array(
@@ -1597,8 +1616,7 @@ class BSI_Importer {
          * @param array  $parent_row   Строка CSV родителя (первая встреченная).
          * @param array  $variant_rows Массив строк вариантов (цвет/размер) из текущего батча.
          * @param bool   $is_multi_variant true если во всём файле у этого IGUArticolo > 1 варианта.
-         *                                 Передаётся из предсканирования, чтобы избежать создания
-         *                                 простого товара когда варианты разбросаны по батчам.
+         * @return int ID товара или 0 при ошибке.
          */
         private function upsert_model( $igu_articolo, $parent_row, $variant_rows, $is_multi_variant = null ) {
                 if ( null === $is_multi_variant ) {
@@ -1611,10 +1629,18 @@ class BSI_Importer {
                 $is_variable = $is_multi_variant;
 
                 if ( $is_variable ) {
-                        $this->upsert_variable_product( $igu_articolo, $parent_row, $variant_rows );
+                        $product_id = $this->upsert_variable_product( $igu_articolo, $parent_row, $variant_rows );
                 } else {
-                        $this->upsert_simple_product( $igu_articolo, $parent_row, $variant_rows[0] );
+                        $product_id = $this->upsert_simple_product( $igu_articolo, $parent_row, $variant_rows[0] );
                 }
+
+                // Сохраняем хеш данных для быстрого определения изменений при повторном импорте.
+                if ( $product_id ) {
+                        $hash = $this->compute_data_hash( $variant_rows );
+                        update_post_meta( $product_id, '_bsi_data_hash', $hash );
+                }
+
+                return $product_id;
         }
 
         /* ---------------------------------------------------------------------
@@ -1722,26 +1748,103 @@ class BSI_Importer {
                 return $product_id;
         }
 
+        /**
+         * Извлечь категорию из строки CSV.
+         * Единая логика: DSRepartoWeb → DSReparto → DSCategoriaMerceologicaWeb → DSCategoriaMerceologica.
+         *
+         * @param array $row Строка CSV.
+         * @return string
+         */
+        private function extract_category( $row ) {
+                $category = '';
+                if ( ! empty( $row['DSRepartoWeb'] ) ) {
+                        $category = $row['DSRepartoWeb'];
+                } elseif ( ! empty( $row['DSReparto'] ) ) {
+                        $category = $row['DSReparto'];
+                }
+                if ( ! $category ) {
+                        if ( ! empty( $row['DSCategoriaMerceologicaWeb'] ) ) {
+                                $category = $row['DSCategoriaMerceologicaWeb'];
+                        } elseif ( ! empty( $row['DSCategoriaMerceologica'] ) ) {
+                                $category = $row['DSCategoriaMerceologica'];
+                        }
+                }
+                return $category;
+        }
+
+        /**
+         * Извлечь бренд из строки CSV.
+         * Единая логика: DSLinea → RaggruppamentoLinea.
+         *
+         * @param array $row Строка CSV.
+         * @return string
+         */
+        private function extract_brand( $row ) {
+                $brand = '';
+                if ( ! empty( $row['DSLinea'] ) ) {
+                        $brand = $row['DSLinea'];
+                } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
+                        $brand = $row['RaggruppamentoLinea'];
+                }
+                return $brand;
+        }
+
+        /**
+         * Вычислить хеш данных товара из CSV-строк вариантов.
+         *
+         * Хешируются ВСЕ поля всех вариантов. Если изменилось хоть одно поле
+         * (цена, название, описание, состав, категория, бренд, картинки, остаток
+         * и т.д.) — хеш изменится, и товар будет переимпортирован.
+         *
+         * @param array $variant_rows Массив строк CSV (варианты одного IGUArticolo).
+         * @return string md5-хеш.
+         */
+        private function compute_data_hash( $variant_rows ) {
+                if ( empty( $variant_rows ) ) {
+                        return '';
+                }
+                $parts = array();
+                foreach ( $variant_rows as $row ) {
+                        // Сортируем по ключам для детерминированности (одинаковые строки = одинаковый хеш).
+                        ksort( $row );
+                        $parts[] = serialize( $row );
+                }
+                return md5( implode( "\n", $parts ) );
+        }
+
         /* ---------------------------------------------------------------------
          * Проверить, изменился ли товар с прошлого импорта.
-         * Сравниваем: картинки (если включено скачивание), цену, остаток для каждой вариации.
-         * Если всё совпадает — пропускаем (return true = skip).
+         *
+         * Стратегия: вычисляем хеш всех данных из CSV и сравниваем с сохранённым
+         * в meta _bsi_data_hash. Если хеши совпадают — товар не изменился.
+         * Дополнительно проверяем наличие картинок (если включено скачивание).
+         *
+         * Преимущества перед старой версией (перебор вариаций с SQL):
+         *   - O(1) вместо O(n) (одно чтение meta вместо n SQL-запросов + n get_product)
+         *   - Повторный импорт 10 000 товаров занимает секунды, а не часы
+         *   - Учитываются ВСЕ поля (раньше — только цена и остаток)
+         *
+         * @param array $variant_rows Массив строк CSV (варианты одного IGUArticolo).
+         * @return bool true — товар не изменился, можно пропустить.
          * --------------------------------------------------------------------- */
         private function product_unchanged( $product_id, $variant_rows ) {
                 if ( ! $product_id ) {
                         return false; // Новый товар — не пропускаем.
                 }
 
+                // ─── Быстрая проверка по хешу ─────────────────────────────────
+                $current_hash = $this->compute_data_hash( $variant_rows );
+                $stored_hash  = get_post_meta( $product_id, '_bsi_data_hash', true );
+
+                if ( $stored_hash !== $current_hash ) {
+                        return false; // Данные изменились — нужно переимпортировать.
+                }
+
                 // ─── Проверка картинок (только если включено скачивание) ──────
-                // Если в настройствах включено "скачивать картинки" — проверяем
-                // что у товара ЕСТЬ featured image. Если нет, но в CSV есть URL —
-                // товар считается изменённым (нужно скачать картинку).
-                // Если скачивание выключено — проверку не делаем (пропускаем товар).
                 $settings = get_option( 'bsi_settings', array() );
                 $download_images = ! isset( $settings['download_images'] ) || '1' === $settings['download_images'];
 
                 if ( $download_images ) {
-                        // Проверяем первый вариант — у всех вариантов одной модели URL одинаковые.
                         $first_row = isset( $variant_rows[0] ) ? $variant_rows[0] : array();
                         $has_csv_image = false;
                         for ( $i = 1; $i <= 10; $i++ ) {
@@ -1752,7 +1855,6 @@ class BSI_Importer {
                         }
 
                         if ( $has_csv_image ) {
-                                // В CSV есть картинка — проверяем что она привязана к товару.
                                 $thumb_id = (int) get_post_thumbnail_id( $product_id );
                                 if ( ! $thumb_id ) {
                                         return false; // Картинки нет — товар "изменён", нужно скачать.
@@ -1760,51 +1862,7 @@ class BSI_Importer {
                         }
                 }
 
-                foreach ( $variant_rows as $row ) {
-                        $cod_articolo = isset( $row['CodArticolo'] ) ? $row['CodArticolo'] : '';
-                        if ( ! $cod_articolo ) {
-                                return false;
-                        }
-
-                        // Находим вариацию по SKU.
-                        global $wpdb;
-                        $var_id = $wpdb->get_var( $wpdb->prepare(
-                                "SELECT p.ID FROM {$wpdb->posts} p
-                                 INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID
-                                   AND pm.meta_key = '_sku' AND pm.meta_value = %s
-                                 WHERE p.post_type = 'product_variation'
-                                   AND p.post_parent = %d
-                                   AND p.post_status != 'trash'
-                                 LIMIT 1",
-                                $cod_articolo,
-                                $product_id
-                        ) );
-
-                        if ( ! $var_id ) {
-                                return false; // Вариация не найдена — нужно создать.
-                        }
-
-                        $variation = wc_get_product( $var_id );
-                        if ( ! $variation ) {
-                                return false;
-                        }
-
-                        // Сравниваем цену.
-                        $csv_price = $this->convert_price( isset( $row['PrezzoIvato'] ) ? (float) $row['PrezzoIvato'] : 0 );
-                        $wc_price  = (float) $variation->get_regular_price();
-                        if ( abs( $csv_price - $wc_price ) > 0.01 ) {
-                                return false; // Цена изменилась.
-                        }
-
-                        // Сравниваем остаток.
-                        $csv_stock = isset( $row['Disponibilita'] ) ? (float) $row['Disponibilita'] : 0;
-                        $wc_stock  = (float) $variation->get_stock_quantity();
-                        if ( $csv_stock !== $wc_stock ) {
-                                return false; // Остаток изменился.
-                        }
-                }
-
-                // Все вариации совпадают — товар не изменился.
+                // Хеш совпадает + картинки на месте → товар не изменился.
                 return true;
         }
 
@@ -2968,15 +3026,46 @@ class BSI_Importer {
                 }
 
                 // ════════════════════════════════════════════════════════════════════
-                // СКАЧИВАНИЕ ВО ВРЕМЕННЫЙ ФАЙЛ.
+                // СКАЧИВАНИЕ ВО ВРЕМЕННЫЙ ФАЙЛ (с повторными попытками).
+                //
+                // 3 попытки с паузой 2 секунды между ними — защита от флаповых
+                // сетевых ошибок (таймаут Sirio, кратковременные сбои DNS и т.п.).
                 // ════════════════════════════════════════════════════════════════════
                 require_once ABSPATH . 'wp-admin/includes/file.php';
                 require_once ABSPATH . 'wp-admin/includes/media.php';
                 require_once ABSPATH . 'wp-admin/includes/image.php';
 
-                $tmp_file = download_url( $url );
+                $max_attempts = 3;
+                $attempt      = 0;
+                $tmp_file     = null;
+                $last_error   = '';
+
+                while ( $attempt < $max_attempts ) {
+                        $attempt++;
+                        $tmp_file = download_url( $url, 60 );
+                        if ( ! is_wp_error( $tmp_file ) ) {
+                                break; // Успешно скачано.
+                        }
+
+                        $last_error = $tmp_file->get_error_message();
+                        $this->log( 'warning', 'Попытка скачать картинку не удалась', array(
+                                'url'       => $url,
+                                'attempt'   => $attempt,
+                                'max'       => $max_attempts,
+                                'error'     => $last_error,
+                        ) );
+
+                        if ( $attempt < $max_attempts ) {
+                                // Пауза перед повторной попыткой.
+                                usleep( 2000000 ); // 2 секунды.
+                        }
+                }
+
                 if ( is_wp_error( $tmp_file ) ) {
-                        $this->log( 'warning', 'Не удалось скачать картинку', array( 'url' => $url, 'err' => $tmp_file->get_error_message() ) );
+                        $this->log( 'warning', 'Не удалось скачать картинку после ' . $max_attempts . ' попыток', array(
+                                'url'   => $url,
+                                'err'   => $last_error,
+                        ) );
                         $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $lock_name ) );
                         return false;
                 }
@@ -3580,7 +3669,8 @@ class BSI_Importer {
                                         if ( count( $errors ) < 5 ) {
                                                 $errors[] = sprintf( 'Product #%d: %s', $product_id, $featured_url );
                                         }
-                                        continue;
+                                        // НЕ continue — галерея всё равно должна обрабатываться,
+                                        // даже если featured не скачалась.
                                 }
                         } else {
                                 $skipped++;

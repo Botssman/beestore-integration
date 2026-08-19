@@ -389,20 +389,67 @@ class BSI_Importer {
                 $start_time = microtime( true );
 
                 // Читаем батч напрямую — без пропуска строк!
-                while ( ! feof( $handle ) ) {
-                        $raw_row = fgetcsv( $handle, 0, ',', '"' );
-                        if ( false === $raw_row || null === $raw_row ) {
-                                break;
+                // Батч ПЛАВАЮЩИЙ: не режем товар посреди его вариантов.
+                // При достижении $batch_size продолжаем читать, пока не завершится
+                // текущий товар (IGUArticolo на строке разреза). Так варианты одного
+                // товара ВСЕГДА попадают в один батч → товар обрабатывается 1 раз.
+                //
+                // ВАЖНО про потери строк: читаем "с опережением" (peek). Строка,
+                // которая не вошла в батч (следующий товар), остаётся в $pending_row
+                // и в начале следующего батча добавляется первой. Так ни одна строка
+                // не теряется между батчами.
+                $pending_row  = null; // строка, прочитанная но не вошедшая в этот батч.
+                $cut_igu      = '';   // IGU товара, «перешагнувшего» лимит.
+                $limit_done   = false;
+
+                // Вливаем недочитанную строку с прошлого батча (если была).
+                // state['pending_row'] — массив этой строки или null.
+                if ( isset( $state['pending_row'] ) && is_array( $state['pending_row'] ) ) {
+                        $pending_row = $state['pending_row'];
+                }
+
+                while ( true ) {
+                        // Берём следующую строку: либо накопленную, либо читаем из файла.
+                        if ( null !== $pending_row ) {
+                                $row         = $pending_row;
+                                $pending_row = null;
+                        } else {
+                                if ( feof( $handle ) ) {
+                                        break;
+                                }
+                                $raw_row = fgetcsv( $handle, 0, ',', '"' );
+                                if ( false === $raw_row || null === $raw_row ) {
+                                        break;
+                                }
+                                if ( count( $raw_row ) < count( $headers ) ) {
+                                        $raw_row = array_pad( $raw_row, count( $headers ), '' );
+                                }
+                                if ( count( $raw_row ) > count( $headers ) ) {
+                                        $raw_row = array_slice( $raw_row, 0, count( $headers ) );
+                                }
+                                $row = array_combine( $headers, array_map( 'trim', $raw_row ) );
                         }
-                        if ( count( $raw_row ) < count( $headers ) ) {
-                                $raw_row = array_pad( $raw_row, count( $headers ), '' );
-                        }
-                        if ( count( $raw_row ) > count( $headers ) ) {
-                                $raw_row = array_slice( $raw_row, 0, count( $headers ) );
-                        }
-                        $batch_rows[] = array_combine( $headers, array_map( 'trim', $raw_row ) );
-                        if ( count( $batch_rows ) >= $batch_size ) {
-                                break;
+
+                        $at_limit = count( $batch_rows ) >= $batch_size;
+                        $igu_now  = isset( $row['IGUArticolo'] ) ? $row['IGUArticolo'] : '';
+
+                        if ( $at_limit && $limit_done ) {
+                                // Лимит достигнут И товар-разрезчик уже определён.
+                                if ( $igu_now === $cut_igu ) {
+                                        // Этот же товар продолжается — берём строку.
+                                        $batch_rows[] = $row;
+                                } else {
+                                        // Товар завершился. Сохраняем строку для следующего батча.
+                                        $pending_row = $row;
+                                        break;
+                                }
+                        } else {
+                                $batch_rows[] = $row;
+                                if ( $at_limit && ! $limit_done ) {
+                                        // Только что перешагнули лимит — фиксируем товар-разрез.
+                                        $cut_igu    = $this->last_igu( $batch_rows );
+                                        $limit_done = true;
+                                }
                         }
                 }
 
@@ -441,6 +488,7 @@ class BSI_Importer {
                                 'processed_rows' => $state['total_rows'],
                                 'last_offset'    => $state['total_rows'],
                                 'file_position'  => 0,
+                                'pending_row'    => null, // хвоста не остаётся.
                         ) );
 
                         wp_send_json_success( array(
@@ -569,6 +617,7 @@ class BSI_Importer {
                         'processed_rows'   => $db_state['processed_rows'] + count( $batch_rows ),
                         'last_offset'      => $db_state['last_offset'] + count( $batch_rows ),
                         'file_position'    => $new_file_pos,
+                        'pending_row'      => ( null !== $pending_row ) ? $pending_row : null,
                         'elapsed_seconds'  => $db_state['elapsed_seconds'] + $elapsed_batch,
                         'errors_count'     => $db_state['errors_count'] + $batch_errors,
                         'last_error'       => $batch_last_err ?: $db_state['last_error'],
@@ -1823,6 +1872,24 @@ class BSI_Importer {
                         $brand = $row['RaggruppamentoLinea'];
                 }
                 return $brand;
+        }
+
+        /**
+         * Найти IGUArticolo последней строки в массиве батча.
+         * Используется для плавающего батча: чтобы не резать товар посреди
+         * вариантов, смотрим IGU той строки, на которой «споткнулись» о лимит.
+         *
+         * @param array $rows Массив строк CSV (батч).
+         * @return string
+         */
+        private function last_igu( $rows ) {
+                $last = null;
+                foreach ( $rows as $r ) {
+                        if ( isset( $r['IGUArticolo'] ) && '' !== $r['IGUArticolo'] ) {
+                                $last = $r['IGUArticolo'];
+                        }
+                }
+                return (string) $last;
         }
 
         /**

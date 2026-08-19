@@ -2950,16 +2950,43 @@ class BSI_Importer {
                 }
 
                 // Первая картинка = featured, остальные — галерея.
+                // FALLBACK: если первая (featured) URL недоступна — подставляем
+                // следующую рабочую картинку как основную, а не пропускаем товар.
                 $featured_url = array_shift( $image_urls );
 
-                $thumb_id = $this->attach_image( $featured_url, $product_id, true );
+                // Пробуем скачать featured; если не получилось — перебираем остальные.
+                $thumb_id = 0;
+                $attempts = array( $featured_url );
+                if ( ! empty( $image_urls ) ) {
+                        $attempts = array_merge( $attempts, $image_urls );
+                }
+                foreach ( $attempts as $candidate ) {
+                        $aid = $this->attach_image( $candidate, $product_id, true );
+                        if ( $aid ) {
+                                $thumb_id = $aid;
+                                // Запоминаем какой URL взяли как featured.
+                                $featured_with_id = ( $candidate === $featured_url ) ? $featured_url : $candidate;
+                                break;
+                        }
+                }
+
                 if ( $thumb_id ) {
                         set_post_thumbnail( $product_id, $thumb_id );
                 }
 
-                // Галерея.
-                $gallery_ids = array();
+                // Галерея — остальные картинки (кроме той, что уже стала featured).
+                $gallery_urls = array();
+                // Начинаем с исходных image_urls (после array_shift оттуда уже убрали первую).
+                // Но если featured взят НЕ из первой — исключаем использованный.
                 foreach ( $image_urls as $url ) {
+                        if ( $url === $featured_url || $url === ( isset( $featured_with_id ) ? $featured_with_id : '' ) ) {
+                                continue;
+                        }
+                        $gallery_urls[] = $url;
+                }
+
+                $gallery_ids = array();
+                foreach ( $gallery_urls as $url ) {
                         $attach_id = $this->attach_image( $url, $product_id, true );
                         if ( $attach_id ) {
                                 $gallery_ids[] = $attach_id;
@@ -3677,28 +3704,43 @@ class BSI_Importer {
                         }
 
                         // Featured image (первая картинка).
-                        $featured_url = $urls[0];
-                        $thumb_id     = get_post_thumbnail_id( $product_id );
+                        // FALLBACK: если первая URL недоступна — пробуем следующие,
+                        // первую рабочую назначаем основной, остальные идём в галерею.
+                        $thumb_id = get_post_thumbnail_id( $product_id );
+                        $used_featured = '';
+                        $featured_got = false;
 
                         if ( ! $thumb_id ) {
-                                $attach_id = $this->attach_image( $featured_url, $product_id, true );
-                                if ( $attach_id ) {
-                                        set_post_thumbnail( $product_id, $attach_id );
-                                        $downloaded++;
-                                } else {
+                                foreach ( $urls as $candidate_url ) {
+                                        $attach_id = $this->attach_image( $candidate_url, $product_id, true );
+                                        if ( $attach_id ) {
+                                                set_post_thumbnail( $product_id, $attach_id );
+                                                $used_featured = $candidate_url;
+                                                $featured_got  = true;
+                                                $downloaded++;
+                                                break;
+                                        }
+                                }
+                                if ( ! $featured_got ) {
                                         $failed++;
                                         if ( count( $errors ) < 5 ) {
-                                                $errors[] = sprintf( 'Product #%d: %s', $product_id, $featured_url );
+                                                $errors[] = sprintf( 'Product #%d: %s', $product_id, ( isset( $urls[0] ) ? $urls[0] : 'no url' ) );
                                         }
-                                        // НЕ continue — галерея всё равно должна обрабатываться,
-                                        // даже если featured не скачалась.
+                                        // НЕ continue — галерея всё равно должна обрабатываться.
                                 }
                         } else {
                                 $skipped++;
+                                $used_featured = $urls[0];
                         }
 
-                        // Галерея (остальные картинки).
-                        $gallery_urls  = array_slice( $urls, 1 );
+                        // Галерея (все картинки, кроме выбранной featured).
+                        $gallery_urls  = array();
+                        foreach ( $urls as $url ) {
+                                if ( $url === $used_featured ) {
+                                        continue;
+                                }
+                                $gallery_urls[] = $url;
+                        }
                         $gallery_ids   = array();
                         $existing_gallery = get_post_meta( $product_id, '_product_image_gallery', true );
                         $existing_ids     = $existing_gallery ? array_map( 'intval', explode( ',', $existing_gallery ) ) : array();

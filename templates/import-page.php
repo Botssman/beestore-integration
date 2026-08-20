@@ -138,6 +138,14 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                                         <td id="bsi-updated-products"><?php echo esc_html( number_format_i18n( $state['updated_products'] ) ); ?></td>
                                 </tr>
                                 <tr>
+                                        <th><?php esc_html_e( 'Пропущено (не изменились):', 'beestore-integration' ); ?></th>
+                                        <td id="bsi-skipped-products"><?php echo esc_html( number_format_i18n( $state['skipped_products'] ) ); ?></td>
+                                </tr>
+                                <tr>
+                                        <th><?php esc_html_e( 'Отфильтровано (вне фильтров):', 'beestore-integration' ); ?></th>
+                                        <td id="bsi-filtered-products"><?php echo esc_html( number_format_i18n( $state['filtered_products'] ) ); ?></td>
+                                </tr>
+                                <tr>
                                         <th><?php esc_html_e( 'Ошибок:', 'beestore-integration' ); ?></th>
                                         <td>
                                                 <span id="bsi-errors-count" style="color:<?php echo $state['errors_count'] > 0 ? '#c62828' : '#666'; ?>;font-weight:600;">
@@ -409,6 +417,8 @@ jQuery(document).ready(function($){
                 $('#bsi-last-update').text(state.last_update || '—');
                 $('#bsi-created-products').text(state.created_products.toLocaleString('ru-RU'));
                 $('#bsi-updated-products').text(state.updated_products.toLocaleString('ru-RU'));
+                $('#bsi-skipped-products').text((state.skipped_products || 0).toLocaleString('ru-RU'));
+                $('#bsi-filtered-products').text((state.filtered_products || 0).toLocaleString('ru-RU'));
                 $('#bsi-errors-count').text(state.errors_count.toLocaleString('ru-RU'));
                 $('#bsi-errors-count').css('color', state.errors_count > 0 ? '#c62828' : '#666');
                 if (state.last_error) {

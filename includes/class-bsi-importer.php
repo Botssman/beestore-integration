@@ -154,6 +154,7 @@ class BSI_Importer {
                         'created_products' => 0,
                         'updated_products' => 0,
                         'skipped_products' => 0,
+                        'filtered_products' => 0,
                 );
                 return wp_parse_args( $state, $defaults );
         }
@@ -302,6 +303,7 @@ class BSI_Importer {
                         'created_products'  => 0,
                         'updated_products'  => 0,
                         'skipped_products'  => 0,
+                        'filtered_products' => 0,
                 );
                 $this->save_import_state( $new_state );
 
@@ -638,6 +640,7 @@ class BSI_Importer {
                         'created_products' => $db_state['created_products'] + $batch_created,
                         'updated_products' => $db_state['updated_products'] + $batch_updated,
                         'skipped_products' => $db_state['skipped_products'] + $batch_skipped,
+                        'filtered_products' => $db_state['filtered_products'] + $skipped_by_filter,
                 ));
 
                 $updated_state = $this->get_import_state();
@@ -647,13 +650,14 @@ class BSI_Importer {
 
                 wp_send_json_success( array(
                         'message'  => sprintf(
-                                __( 'Обработано: %d / %d (%.1f%%). Создано: %d, обновлено: %d, пропущено: %d, ошибок: %d', 'beestore-integration' ),
+                                __( 'Обработано: %d / %d (%.1f%%). Создано: %d, обновлено: %d, пропущено: %d, отфильтровано: %d, ошибок: %d', 'beestore-integration' ),
                                 $updated_state['processed_rows'],
                                 $updated_state['total_rows'],
                                 $percent,
                                 $batch_created,
                                 $batch_updated,
                                 $batch_skipped,
+                                $skipped_by_filter,
                                 $batch_errors
                         ),
                         'state'       => $updated_state,

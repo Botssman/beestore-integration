@@ -2960,60 +2960,6 @@ class BSI_Importer {
                 }
         }
 
-        /**
-         * Конвертация цены по формуле:
-         *   итог = цена_поставщика × курс_валюты × коэффициент_надбавки + фиксированная_надбавка
-         *
-         * Пример:
-         *   цена поставщика = 100 EUR
-         *   курс = 100 (100 RUB за 1 EUR)
-         *   коэффициент = 1.3 (наценка 30%)
-         *   фикс = 500 RUB
-         *   итог = 100 × 100 × 1.3 + 500 = 13 500 RUB
-         *
-         * Если конвертация выключена — возвращает цену без изменений.
-         *
-         * @param float $price Цена в валюте поставщика.
-         * @return float Цена в валюте магазина.
-         */
-        private function convert_price( $price ) {
-                if ( $price <= 0 ) {
-                        return $price;
-                }
-
-                $settings = get_option( 'bsi_settings', array() );
-
-                // Конвертация цен ВСЕГДА применяется при импорте.
-                // Курс берём через BSI_Currency::get_rate_for_conversion() — это
-                // корректно работает и для ручного, и для авто-режима (в авто-режиме
-                // курс читается из отдельной опции 'bsi_currency_rate_auto', которую
-                // не могут затереть сохранения формы настроек).
-                $rate   = class_exists( 'BSI_Currency' )
-                        ? BSI_Currency::instance()->get_rate_for_conversion()
-                        : ( isset( $settings['currency_rate'] ) ? (float) $settings['currency_rate'] : 1 );
-                $markup = isset( $settings['markup_coefficient'] ) ? (float) $settings['markup_coefficient'] : 1;
-                $fixed  = isset( $settings['fixed_markup'] ) ? (float) $settings['fixed_markup'] : 0;
-                $round  = isset( $settings['round_prices'] ) && '1' === $settings['round_prices'];
-
-                // Защита от нулевого курса/коэффициента.
-                if ( $rate <= 0 ) {
-                        $rate = 1;
-                }
-                if ( $markup <= 0 ) {
-                        $markup = 1;
-                }
-
-                // Формула.
-                $result = ( $price * $rate * $markup ) + $fixed;
-
-                // Округление до целых (если включено).
-                if ( $round ) {
-                        $result = round( $result );
-                }
-
-                return $result;
-        }
-
         /* ---------------------------------------------------------------------
          * Остаток.
          * --------------------------------------------------------------------- */

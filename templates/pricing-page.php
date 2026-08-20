@@ -146,10 +146,7 @@ if ( $round_prices ) {
                 <?php wp_nonce_field( 'bsi_pricing_save', 'bsi_pricing_nonce' ); ?>
 
                 <h2 class="nav-tab-wrapper" style="margin-bottom:15px;">
-                        <a href="#bsi-pricing-general" class="nav-tab nav-tab-active" data-tab="general"><?php esc_html_e( 'Валюта и курс', 'beestore-integration' ); ?></a>
-                        <a href="#bsi-pricing-new" class="nav-tab" data-tab="new"><?php esc_html_e( 'Новая логика цен', 'beestore-integration' ); ?></a>
-                        <a href="#bsi-pricing-markup" class="nav-tab" data-tab="markup"><?php esc_html_e( 'Надбавки (устар.)', 'beestore-integration' ); ?></a>
-                        <a href="#bsi-pricing-preview" class="nav-tab" data-tab="preview"><?php esc_html_e( 'Пример расчёта', 'beestore-integration' ); ?></a>
+                        <a href="#bsi-pricing-new" class="nav-tab nav-tab-active" data-tab="new"><?php esc_html_e( 'Новая логика цен', 'beestore-integration' ); ?></a>
                 </h2>
 
                 <!-- Вкладка: валюта и курс -->
@@ -340,8 +337,8 @@ if ( $round_prices ) {
                         </p>
                 </div>
 
-                <!-- Новая логика цен -->
-                <div id="bsi-pricing-new" class="bsi-pricing-tab" style="display:none;">
+                <!-- Новая логика цен (видима по умолчанию) -->
+                <div id="bsi-pricing-new" class="bsi-pricing-tab">
                         <?php
                         $pricing_settings = class_exists( 'BSI_Pricing' ) ? BSI_Pricing::instance()->get_settings() : array( 'min_income' => 0, 'eur_rate' => 100 );
                         ?>

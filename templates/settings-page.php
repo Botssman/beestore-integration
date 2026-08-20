@@ -64,14 +64,6 @@ $webp_enabled            = isset( $settings['webp_enabled'] ) && '1' === $settin
 $webp_strategy           = isset( $settings['webp_strategy'] ) ? $settings['webp_strategy'] : 3;
 $webp_supports           = class_exists( 'BSI_WebP' ) ? BSI_WebP::instance()->server_supports() : false;
 
-// Текущий курс через BSI_Currency (для отображения).
-$current_rate_info = class_exists( 'BSI_Currency' ) ? BSI_Currency::instance()->get_current_rate() : array(
-        'rate'    => $currency_rate,
-        'source'  => 'manual',
-        'updated' => '',
-        'mode'    => $currency_rate_mode,
-);
-
 // Человекопонятные названия источников.
 $source_names = array(
         'manual'        => __( 'Ручной ввод', 'beestore-integration' ),

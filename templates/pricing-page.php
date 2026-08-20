@@ -21,14 +21,6 @@ $markup_coefficient        = isset( $settings['markup_coefficient'] ) ? (float) 
 $fixed_markup              = isset( $settings['fixed_markup'] ) ? (float) $settings['fixed_markup'] : 0;
 $round_prices              = isset( $settings['round_prices'] ) && '1' === $settings['round_prices'];
 
-// Информация о текущем курсе (через BSI_Currency).
-$current_rate_info = class_exists( 'BSI_Currency' ) ? BSI_Currency::instance()->get_current_rate() : array(
-        'rate'    => $currency_rate,
-        'source'  => 'manual',
-        'updated' => '',
-        'mode'    => $currency_rate_mode,
-);
-
 $source_names = array(
         'manual'        => __( 'Ручной ввод', 'beestore-integration' ),
         'cbrf'          => __( 'ЦБ РФ (только для RUB)', 'beestore-integration' ),
@@ -37,10 +29,17 @@ $source_names = array(
         'er_api'        => __( 'open.er-api.com (универсальный)', 'beestore-integration' ),
         'same_currency' => __( 'Валюты совпадают', 'beestore-integration' ),
 );
-$source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source_names[ $current_rate_info['source'] ] : $current_rate_info['source'];
+// Дефолты для устаревших скрытых блоков (курс теперь только ручной — из bsi_pricing).
+$current_rate_info = array(
+        'rate'    => 0,
+        'source'  => 'manual',
+        'updated' => '',
+        'mode'    => 'manual',
+);
+$source_label      = __( 'Ручной ввод', 'beestore-integration' );
 
-// Следующее авто-обновление (когда сработает cron).
-$next_refresh = wp_next_scheduled( 'bsi_cron_refresh_rate' );
+// Авто-обновление курса удалено — показываем «не запланировано».
+$next_refresh = false;
 
 $currencies = array( 'EUR', 'USD', 'GBP', 'RUB', 'KZT', 'UAH', 'BYN', 'TRY', 'AMD', 'GEL', 'CHF', 'JPY', 'CNY' );
 

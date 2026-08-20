@@ -24,7 +24,6 @@ class BSI_Cron {
                 add_action( 'bsi_cron_import_catalog', array( BSI_Importer::instance(), 'cron_import' ) );
                 add_action( 'bsi_cron_status_sync', array( BSI_Status_Sync::instance(), 'cron_sync' ) );
                 add_action( 'bsi_cron_process_queue', array( BSI_Order_Sync::instance(), 'process_queue' ) );
-                add_action( 'bsi_cron_refresh_rate', array( BSI_Currency::instance(), 'cron_refresh_rate' ) );
 
                 // Раз в день чистим старые логи.
                 add_action( 'wp_scheduled_delete', array( $this, 'cleanup_logs' ) );

@@ -48,6 +48,7 @@ class BSI_Importer {
                 add_action( 'wp_ajax_bsi_import_start', array( $this, 'ajax_import_start' ) );
                 add_action( 'wp_ajax_bsi_import_process_batch', array( $this, 'ajax_import_process_batch' ) );
                 add_action( 'wp_ajax_bsi_import_pause', array( $this, 'ajax_import_pause' ) );
+                add_action( 'wp_ajax_bsi_import_continue', array( $this, 'ajax_import_continue' ) );
                 add_action( 'wp_ajax_bsi_import_stop', array( $this, 'ajax_import_stop' ) );
                 add_action( 'wp_ajax_bsi_import_status', array( $this, 'ajax_import_status' ) );
 

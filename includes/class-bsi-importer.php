@@ -772,7 +772,14 @@ class BSI_Importer {
                 $lock_pid  = get_transient( 'bsi_import_lock_pid' );
                 $stop_flag = get_transient( 'bsi_import_stop_requested' );
 
+                // Учитываем настройку: если импорт отключён — не показываем «следующий запуск».
+                $settings  = get_option( 'bsi_settings', array() );
+                $freq      = isset( $settings['sync_frequency'] ) ? $settings['sync_frequency'] : 'hourly';
+
                 $next_cron = wp_next_scheduled( 'bsi_cron_import_catalog' );
+                if ( 'disabled' === $freq || ! $freq ) {
+                        $next_cron = false; // Отключено в настройках — не планируем.
+                }
                 $last_import = get_option( 'bsi_last_import_finished', '' );
                 $last_zip = get_option( 'bsi_last_import_zip', '' );
 

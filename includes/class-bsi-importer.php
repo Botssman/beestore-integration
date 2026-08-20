@@ -3191,6 +3191,10 @@ class BSI_Importer {
         private function apply_images( $product_id, $row, $parent_id = null ) {
                 $settings = get_option( 'bsi_settings', array() );
                 $download_images = ! isset( $settings['download_images'] ) || '1' === $settings['download_images'];
+                // Настройка: снимать с публикации (черновик) товары без картинок.
+                $draft_no_image = isset( $settings['draft_no_image'] ) && '1' === $settings['draft_no_image'];
+                // Это родитель (не вариация)?
+                $is_parent = ( null === $parent_id );
 
                 $image_urls = array();
                 for ( $i = 1; $i <= 10; $i++ ) {
@@ -3201,7 +3205,12 @@ class BSI_Importer {
                 }
 
                 if ( empty( $image_urls ) ) {
-                        return;
+                        // В CSV нет ссылок на фото.
+                        // Если это родитель, опция вкл и скачивание вкл — делаем черновиком.
+                        if ( $is_parent && $draft_no_image && $download_images ) {
+                                $this->maybe_set_product_status( $product_id, 'draft' );
+                        }
+                        return false;
                 }
 
                 // Сохраняем ВСЕ URL картинок в meta — даже если не скачиваем.
@@ -3213,7 +3222,7 @@ class BSI_Importer {
 
                 // Если скачивание выключено — выходим, URL уже сохранены в meta.
                 if ( ! $download_images ) {
-                        return;
+                        return true;
                 }
 
                 // Первая картинка = featured, остальные — галерея.
@@ -3262,6 +3271,32 @@ class BSI_Importer {
                 if ( ! empty( $gallery_ids ) ) {
                         update_post_meta( $product_id, '_product_image_gallery', implode( ',', $gallery_ids ) );
                 }
+
+                // Если это родитель, картинки есть (featured или галерея) и включена опция —
+                // удостоверяемся что товар опубликован (если был черновиком).
+                $has_image = (bool) $thumb_id || ! empty( $gallery_ids );
+                if ( $is_parent && $draft_no_image ) {
+                        if ( $has_image ) {
+                                $this->maybe_set_product_status( $product_id, 'publish' );
+                        } else {
+                                $this->maybe_set_product_status( $product_id, 'draft' );
+                        }
+                }
+
+                return $has_image;
+        }
+
+        /**
+         * Безопасно обновить статус товара, не трогая даты публикации.
+         *
+         * @param int    $product_id
+         * @param string $status        draft | publish
+         */
+        private function maybe_set_product_status( $product_id, $status ) {
+                wp_update_post( array(
+                        'ID'          => $product_id,
+                        'post_status' => $status,
+                ) );
         }
 
         /**

@@ -52,6 +52,7 @@ class BSI_Installer {
                                 'full_import_time'     => '02:00',
                                 'import_batch_size'  => 25,
                                 'download_images'    => '1',
+                                'draft_no_image'    => '1',
                                 'delete_out_of_stock' => '0', // Если 1 — снимать с публикации товары, отсутствующие в выгрузке.
                                 'mapping_payment'    => array(), // WC gateway_id => IDTipoIncasso.
                                 // Конвертация цен.

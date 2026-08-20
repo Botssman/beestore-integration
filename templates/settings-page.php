@@ -37,6 +37,7 @@ $enable_status_sync    = isset( $settings['enable_status_sync'] ) && '1' === $se
 $enable_realtime_stock = isset( $settings['enable_realtime_stock'] ) && '1' === $settings['enable_realtime_stock'];
 $delete_out_of_stock   = isset( $settings['delete_out_of_stock'] ) && '1' === $settings['delete_out_of_stock'];
 $download_images       = ! isset( $settings['download_images'] ) || '1' === $settings['download_images'];
+$draft_no_image        = ! isset( $settings['draft_no_image'] ) || '1' === $settings['draft_no_image'];
 
 $sync_frequency        = isset( $settings['sync_frequency'] ) ? $settings['sync_frequency'] : 'hourly';
 $status_sync_frequency = isset( $settings['status_sync_frequency'] ) ? $settings['status_sync_frequency'] : 'hourly';
@@ -366,6 +367,18 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                         <td>
                                                 <p class="description">
                                                         ✓ <?php esc_html_e( 'Плагин автоматически переиспользует картинки по имени файла (без расширения). Если картинка уже скачана (как .jpg или .webp), она не будет скачана заново при повторном импорте.', 'beestore-integration' ); ?>
+                                                </p>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><?php esc_html_e( 'Товары без картинок', 'beestore-integration' ); ?></th>
+                                        <td>
+                                                <label>
+                                                        <input type="checkbox" name="bsi_settings[draft_no_image]" value="1" <?php checked( $draft_no_image ); ?>>
+                                                        <?php esc_html_e( 'Снимать с публикации (черновиком) товары, у которых нет ни одной картинки', 'beestore-integration' ); ?>
+                                                </label>
+                                                <p class="description">
+                                                        <?php esc_html_e( 'Если в CSV нет URLImg у товара — он станет черновиком. При появлении картинок в следующей выгрузке — снова опубликуется.', 'beestore-integration' ); ?>
                                                 </p>
                                         </td>
                                 </tr>

@@ -585,9 +585,9 @@ class BSI_Importer {
 
                                 // ─── Пропуск неизменённых товаров ──────────────────────
                                 if ( $existing_id && $this->product_unchanged( $existing_id, $data['variants'] ) ) {
-                                        // Даже если данные не изменились — проверим статус по картинкам
-                                        // (нет картинки → черновик, появилась → публикация).
-                                        $this->sync_visibility_by_images( $existing_id );
+                                        // Даже если данные не изменились — проверим статус по наличию
+                                        // картинок В CSV (нет ни одного URLImg → черновик).
+                                        $this->sync_visibility_by_images( $existing_id, $data['variants'] );
                                         $batch_skipped++;
                                         BSI_Import_Filters::instance()->increment_counters( $category, $brand );
                                         continue;
@@ -3196,7 +3196,8 @@ class BSI_Importer {
                 $settings = get_option( 'bsi_settings', array() );
                 $download_images = ! isset( $settings['download_images'] ) || '1' === $settings['download_images'];
                 // Настройка: снимать с публикации (черновик) товары без картинок.
-                $draft_no_image = isset( $settings['draft_no_image'] ) && '1' === $settings['draft_no_image'];
+                // Включена по умолчанию (даже если ключа ещё нет в сохранённых настройках).
+                $draft_no_image = ! isset( $settings['draft_no_image'] ) || '1' === $settings['draft_no_image'];
                 // Это родитель (не вариация)?
                 $is_parent = ( null === $parent_id );
 
@@ -3304,28 +3305,40 @@ class BSI_Importer {
         }
 
         /**
-         * Синхронизировать статус товара по наличию картинок.
+         * Синхронизировать статус товара по наличию картинок В ВЫГРУЗКЕ (CSV).
          * Используется для НЕИЗМЕНЁННЫХ товаров (пропущенных при импорте):
-         *   - если у товара нет ни одной картинки — ставим черновик
-         *   - если картинка появилась — публикуем (если был черновиком)
+         *   - если в CSV у товара нет ни одного URLImg → черновик
+         *   - если хотя бы один URLImg есть → публикуем (если был черновиком)
          *
-         * @param int $product_id ID родителя.
+         * @param int   $product_id  ID родителя.
+         * @param array $variant_rows Строки CSV вариантов товара.
          */
-        private function sync_visibility_by_images( $product_id ) {
+        private function sync_visibility_by_images( $product_id, $variant_rows = array() ) {
                 $settings = get_option( 'bsi_settings', array() );
                 $download_images = ! isset( $settings['download_images'] ) || '1' === $settings['download_images'];
-                $draft_no_image  = isset( $settings['draft_no_image'] ) && '1' === $settings['draft_no_image'];
+                // Включена по умолчанию.
+                $draft_no_image  = ! isset( $settings['draft_no_image'] ) || '1' === $settings['draft_no_image'];
 
                 if ( ! $download_images || ! $draft_no_image ) {
                         return; // Функция отключена.
                 }
 
-                $has_image = (bool) get_post_thumbnail_id( $product_id );
+                // Ищем хоть одну картинку в строках CSV вариантов товара.
+                $has_csv_image = false;
+                foreach ( $variant_rows as $vr ) {
+                        for ( $i = 1; $i <= 10; $i++ ) {
+                                if ( ! empty( $vr[ 'URLImg' . $i ] ) ) {
+                                        $has_csv_image = true;
+                                        break 2;
+                                }
+                        }
+                }
+
                 $status = get_post_status( $product_id );
 
-                if ( ! $has_image && 'publish' === $status ) {
+                if ( ! $has_csv_image && 'publish' === $status ) {
                         $this->maybe_set_product_status( $product_id, 'draft' );
-                } elseif ( $has_image && 'draft' === $status ) {
+                } elseif ( $has_csv_image && 'draft' === $status ) {
                         $this->maybe_set_product_status( $product_id, 'publish' );
                 }
         }

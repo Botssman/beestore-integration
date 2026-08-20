@@ -585,6 +585,9 @@ class BSI_Importer {
 
                                 // ─── Пропуск неизменённых товаров ──────────────────────
                                 if ( $existing_id && $this->product_unchanged( $existing_id, $data['variants'] ) ) {
+                                        // Даже если данные не изменились — проверим статус по картинкам
+                                        // (нет картинки → черновик, появилась → публикация).
+                                        $this->sync_visibility_by_images( $existing_id );
                                         $batch_skipped++;
                                         BSI_Import_Filters::instance()->increment_counters( $category, $brand );
                                         continue;
@@ -642,7 +645,8 @@ class BSI_Importer {
                         'last_offset'      => $db_state['last_offset'] + count( $batch_rows ),
                         'file_position'    => $new_file_pos,
                         'pending_row'      => ( null !== $pending_row ) ? $pending_row : null,
-                        'elapsed_seconds'  => $db_state['elapsed_seconds'] + $elapsed_batch,
+                        // Реальное прошедшее время с начала импорта (не только обработка батча).
+                        'elapsed_seconds'  => (int) ( strtotime( current_time( 'mysql' ) ) - ( isset( $db_state['started_at'] ) && $db_state['started_at'] ? strtotime( $db_state['started_at'] ) : time() ) ),
                         'errors_count'     => $db_state['errors_count'] + $batch_errors,
                         'last_error'       => $batch_last_err ?: $db_state['last_error'],
                         'created_products' => $db_state['created_products'] + $batch_created,
@@ -3297,6 +3301,33 @@ class BSI_Importer {
                         'ID'          => $product_id,
                         'post_status' => $status,
                 ) );
+        }
+
+        /**
+         * Синхронизировать статус товара по наличию картинок.
+         * Используется для НЕИЗМЕНЁННЫХ товаров (пропущенных при импорте):
+         *   - если у товара нет ни одной картинки — ставим черновик
+         *   - если картинка появилась — публикуем (если был черновиком)
+         *
+         * @param int $product_id ID родителя.
+         */
+        private function sync_visibility_by_images( $product_id ) {
+                $settings = get_option( 'bsi_settings', array() );
+                $download_images = ! isset( $settings['download_images'] ) || '1' === $settings['download_images'];
+                $draft_no_image  = isset( $settings['draft_no_image'] ) && '1' === $settings['draft_no_image'];
+
+                if ( ! $download_images || ! $draft_no_image ) {
+                        return; // Функция отключена.
+                }
+
+                $has_image = (bool) get_post_thumbnail_id( $product_id );
+                $status = get_post_status( $product_id );
+
+                if ( ! $has_image && 'publish' === $status ) {
+                        $this->maybe_set_product_status( $product_id, 'draft' );
+                } elseif ( $has_image && 'draft' === $status ) {
+                        $this->maybe_set_product_status( $product_id, 'publish' );
+                }
         }
 
         /**

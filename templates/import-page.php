@@ -451,7 +451,7 @@ jQuery(document).ready(function($){
                 var current = parseInt($count.text(), 10) || 0;
                 var newCount = current + items.length;
                 $count.text(newCount);
-                $$.each(items, function(i, item) {
+                $.each(items, function(i, item) {
                         var name = item.name || item.igu || '';
                         var safeName = $('<div>').text(name).html();
                         var safeIgu = $('<div>').text(item.igu || '').html();
@@ -605,23 +605,13 @@ jQuery(document).ready(function($){
                         nonce: bsiAdmin.nonce
                 }, function(response) {
                         if (response.success) {
-                                appendLog(response.data.message, 'info');
-                                // Обновляем состояние.
-                                $.post(bsiAdmin.ajaxUrl, {
-                                        action: 'bsi_import_status',
-                                        nonce: bsiAdmin.nonce
-                                }, function(resp) {
-                                        if (resp.success) {
-                                                updateUI(resp.data.state, resp.data.percent);
-                                                if (resp.data.state.status === 'running') {
-                                                        startBatchLoop();
-                                                        startPolling();
-                                                }
-                                        }
-                                });
+                                appendLog('Импорт продолжён', 'info');
+                                startBatchLoop();
                         } else {
                                 appendLog('Ошибка: ' + (response.data.message || 'unknown'), 'error');
                         }
+                }).fail(function() {
+                        appendLog('AJAX error при продолжении', 'error');
                 });
         });
 

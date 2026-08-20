@@ -147,7 +147,8 @@ if ( $round_prices ) {
 
                 <h2 class="nav-tab-wrapper" style="margin-bottom:15px;">
                         <a href="#bsi-pricing-general" class="nav-tab nav-tab-active" data-tab="general"><?php esc_html_e( 'Валюта и курс', 'beestore-integration' ); ?></a>
-                        <a href="#bsi-pricing-markup" class="nav-tab" data-tab="markup"><?php esc_html_e( 'Надбавки', 'beestore-integration' ); ?></a>
+                        <a href="#bsi-pricing-new" class="nav-tab" data-tab="new"><?php esc_html_e( 'Новая логика цен', 'beestore-integration' ); ?></a>
+                        <a href="#bsi-pricing-markup" class="nav-tab" data-tab="markup"><?php esc_html_e( 'Надбавки (устар.)', 'beestore-integration' ); ?></a>
                         <a href="#bsi-pricing-preview" class="nav-tab" data-tab="preview"><?php esc_html_e( 'Пример расчёта', 'beestore-integration' ); ?></a>
                 </h2>
 
@@ -336,6 +337,37 @@ if ( $round_prices ) {
 
                         <p style="margin-top:20px;color:#666;">
                                 <?php esc_html_e( 'Измените параметры выше, сохраните — и при следующем импорте каталога все цены пересчитаются по новой формуле.', 'beestore-integration' ); ?>
+                        </p>
+                </div>
+
+                <!-- Новая логика цен -->
+                <div id="bsi-pricing-new" class="bsi-pricing-tab" style="display:none;">
+                        <?php
+                        $pricing_settings = class_exists( 'BSI_Pricing' ) ? BSI_Pricing::instance()->get_settings() : array( 'min_income' => 0, 'eur_rate' => 100 );
+                        ?>
+                        <div class="notice notice-info" style="border-left-color:#2271b1;">
+                                <p>
+                                        <?php esc_html_e( 'Новая логика: цена считается от закупочной и розничной цены BeeStore, учитывая минимальную доходность и НДС 22%.', 'beestore-integration' ); ?>
+                                </p>
+                        </div>
+                        <table class="form-table" role="presentation">
+                                <tr>
+                                        <th><label for="pricing_eur_rate"><?php esc_html_e( 'Курс евро (₽ за 1 €)', 'beestore-integration' ); ?></label></th>
+                                        <td>
+                                                <input type="number" step="0.01" min="0" name="pricing_eur_rate" id="pricing_eur_rate" value="<?php echo esc_attr( $pricing_settings['eur_rate'] ); ?>" class="small-text">
+                                                <p class="description"><?php esc_html_e( 'Сколько рублей в одном евро. Умножается на цену BeeStore для получения цены в рублях.', 'beestore-integration' ); ?></p>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><label for="pricing_min_income"><?php esc_html_e( 'Минимальная доходность (€ с товара)', 'beestore-integration' ); ?></label></th>
+                                        <td>
+                                                <input type="number" step="0.01" min="0" name="pricing_min_income" id="pricing_min_income" value="<?php echo esc_attr( $pricing_settings['min_income'] ); ?>" class="small-text">
+                                                <p class="description"><?php esc_html_e( 'Минимальная наценка на товар в евро: если розничная цена ниже (закупка + доходность), цена поднимается.', 'beestore-integration' ); ?></p>
+                                        </td>
+                                </tr>
+                        </table>
+                        <p style="background:#f0f6ff;padding:12px 16px;border-radius:3px;">
+                                <?php esc_html_e( 'Формула расчёта: пол цены = (закупка + мин. доходность) × 1.22. База = max(РРЦ, пол). Скидка ≤ 50% скидки поставщика, ступень — 5%. Цена в ₽ округляется до 100 вверх.', 'beestore-integration' ); ?>
                         </p>
                 </div>
 

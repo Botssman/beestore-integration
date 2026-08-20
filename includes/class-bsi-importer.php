@@ -2908,42 +2908,55 @@ class BSI_Importer {
          * --------------------------------------------------------------------- */
         private function apply_pricing( $product, $row ) {
                 $price_gross  = isset( $row['PrezzoIvato'] ) ? (float) $row['PrezzoIvato'] : 0;
-                $price_disc   = isset( $row['PrezzoScontatoIvato'] ) ? (float) $row['PrezzoScontatoIvato'] : 0;
                 $discount     = isset( $row['Sconto'] ) ? (float) $row['Sconto'] : 0;
 
                 // Сохраняем ОРИГИНАЛЬНЫЕ цены BeeStore в мете — нужно для кнопки
-                // «Пересчитать цены» на странице Конвертации, чтобы не зависеть
-                // от повторного импорта при изменении курса/наценки.
+                // «Пересчитать цены», чтобы не зависеть от повторного импорта.
                 if ( $price_gross > 0 ) {
                         $product->update_meta_data( '_bsi_original_price_gross', $price_gross );
-                }
-                if ( $price_disc > 0 ) {
-                        $product->update_meta_data( '_bsi_original_price_disc', $price_disc );
                 }
                 if ( $discount > 0 ) {
                         $product->update_meta_data( '_bsi_original_discount', $discount );
                 }
-
-                // Применяем конвертацию цен (если включена).
-                // Формула: цена_поставщика × курс_валюты × коэффициент_надбавки + фиксированная_надбавка
-                $price_gross_converted = $this->convert_price( $price_gross );
-                $price_disc_converted  = $this->convert_price( $price_disc );
-
-                if ( $price_gross_converted > 0 ) {
-                        $product->set_regular_price( wc_format_decimal( $price_gross_converted, 2 ) );
+                // Закупочную цену сохраняем тоже — нужна для пересчёта.
+                $pricing_inst = class_exists( 'BSI_Pricing' ) ? BSI_Pricing::instance() : null;
+                if ( $pricing_inst ) {
+                        $purchase = $pricing_inst->get_purchase_price( $row );
+                        if ( $purchase > 0 ) {
+                                $product->update_meta_data( '_bsi_original_purchase', $purchase );
+                        }
                 }
 
-                if ( $price_disc_converted > 0 && $price_disc_converted < $price_gross_converted ) {
-                        $product->set_sale_price( wc_format_decimal( $price_disc_converted, 2 ) );
-                        $product->set_price( wc_format_decimal( $price_disc_converted, 2 ) );
-                } elseif ( $discount > 0 && $price_gross_converted > 0 ) {
-                        // Если есть скидка в %, но нет PrezzoScontatoIvato — вычисляем.
-                        $sale = $price_gross_converted * ( 1 - $discount / 100 );
-                        $product->set_sale_price( wc_format_decimal( $sale, 2 ) );
-                        $product->set_price( wc_format_decimal( $sale, 2 ) );
-                } else {
+                // Новая логика: BSI_Pricing считает regular / old / new цены в ₽.
+                $pricing = class_exists( 'BSI_Pricing' ) ? BSI_Pricing::instance() : null;
+                $r       = false;
+                if ( $pricing ) {
+                        $r = $pricing->from_item( $row );
+                        if ( is_array( $r ) ) {
+                                $pricing->apply( $product, $r );
+                        }
+                }
+
+                // Страховка (если BSI_Pricing недоступен или не сработал) —
+                // оставляем прежнее поведение по PrezzoIvato напрямую.
+                if ( false === $r ) {
+                        $this->price_fallback_pricing( $product, $row );
+                }
+        }
+
+        /**
+         * Запасной путь если новая логика не дала результат.
+         * Ставит обычную цену PrezzoIvato без конвертации (на случай сбоя).
+         *
+         * @param WC_Product $product
+         * @param array      $row
+         */
+        private function price_fallback_pricing( $product, $row ) {
+                $price_gross = isset( $row['PrezzoIvato'] ) ? (float) $row['PrezzoIvato'] : 0;
+                if ( $price_gross > 0 ) {
+                        $product->set_regular_price( wc_format_decimal( $price_gross, 2 ) );
                         $product->set_sale_price( '' );
-                        $product->set_price( wc_format_decimal( $price_gross_converted, 2 ) );
+                        $product->set_price( wc_format_decimal( $price_gross, 2 ) );
                 }
         }
 
@@ -4287,8 +4300,10 @@ class BSI_Importer {
                         }
 
                         // Читаем оригинальные цены из меты.
-                        $original_gross = (float) $product->get_meta( '_bsi_original_price_gross' );
-                        $original_disc  = (float) $product->get_meta( '_bsi_original_price_disc' );
+                        $original_gross       = (float) $product->get_meta( '_bsi_original_price_gross' );
+                        $original_purchase    = (float) $product->get_meta( '_bsi_original_purchase' ) > 0
+                                ? (float) $product->get_meta( '_bsi_original_purchase' )
+                                : 0;
                         $original_disc_pct = (float) $product->get_meta( '_bsi_original_discount' );
 
                         if ( $original_gross <= 0 ) {
@@ -4296,24 +4311,25 @@ class BSI_Importer {
                                 continue;
                         }
 
-                        // Применяем текущую формулу.
-                        $price_gross_converted = $this->convert_price( $original_gross );
-                        $price_disc_converted  = $original_disc > 0 ? $this->convert_price( $original_disc ) : 0;
+                        // Новая логика: пересчитываем через BSI_Pricing.
+                        $pricing = class_exists( 'BSI_Pricing' ) ? BSI_Pricing::instance() : null;
+                        if ( $pricing ) {
+                                $s     = $pricing->get_settings();
+                                $retail = $pricing->num( $original_gross );
+                                $pur    = $original_purchase > 0 ? $original_purchase : $retail; // fallback
+                                // При пересчёте закупку берём как retail*?? Нет: если нет покупной —
+                                // используем оригинальную расчётную (падение на retail).
+                                // minimal income из настроек.
+                                $r = $pricing->num( $original_purchase ) > 0
+                                        ? $pricing->calculate( $retail, $original_purchase, $original_disc_pct, $s['min_income'], $s['eur_rate'] )
+                                        : $pricing->calculate( $retail, $retail, $original_disc_pct, $s['min_income'], $s['eur_rate'] );
 
-                        if ( $price_gross_converted > 0 ) {
-                                $product->set_regular_price( wc_format_decimal( $price_gross_converted, 2 ) );
-                        }
-
-                        if ( $price_disc_converted > 0 && $price_disc_converted < $price_gross_converted ) {
-                                $product->set_sale_price( wc_format_decimal( $price_disc_converted, 2 ) );
-                                $product->set_price( wc_format_decimal( $price_disc_converted, 2 ) );
-                        } elseif ( $original_disc_pct > 0 && $price_gross_converted > 0 ) {
-                                $sale = $price_gross_converted * ( 1 - $original_disc_pct / 100 );
-                                $product->set_sale_price( wc_format_decimal( $sale, 2 ) );
-                                $product->set_price( wc_format_decimal( $sale, 2 ) );
+                                $pricing->apply( $product, $r );
                         } else {
+                                // Запасной старый путь (без конвертации) — ставим грубую цену.
+                                $product->set_regular_price( wc_format_decimal( $original_gross, 2 ) );
                                 $product->set_sale_price( '' );
-                                $product->set_price( wc_format_decimal( $price_gross_converted, 2 ) );
+                                $product->set_price( wc_format_decimal( $original_gross, 2 ) );
                         }
 
                         $product->save();

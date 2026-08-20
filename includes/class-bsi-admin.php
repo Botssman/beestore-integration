@@ -159,6 +159,18 @@ class BSI_Admin {
                         // Принудительно включаем конвертацию (теперь это обязательно).
                         $settings['enable_price_conversion'] = '1';
 
+                        // ─── Новая логика расчёта цен (мин. доходность + курс евро) ───
+                        $pricing_opts = get_option( 'bsi_pricing', array() );
+                        $min_income   = isset( $_POST['pricing_min_income'] ) ? floatval( wp_unslash( $_POST['pricing_min_income'] ) ) : 0;
+                        $pricing_opts['min_income'] = $min_income >= 0 ? $min_income : 0;
+                        $eur_rate                   = isset( $_POST['pricing_eur_rate'] ) ? floatval( wp_unslash( $_POST['pricing_eur_rate'] ) ) : 100;
+                        $pricing_opts['eur_rate']   = $eur_rate > 0 ? $eur_rate : 1;
+                        update_option( 'bsi_pricing', $pricing_opts, false );
+                        // Сбрасываем кэш настроек класса.
+                        if ( class_exists( 'BSI_Pricing' ) ) {
+                                BSI_Pricing::instance()->flush_settings_cache();
+                        }
+
                         $settings['supplier_currency'] = isset( $_POST['supplier_currency'] ) ? sanitize_text_field( wp_unslash( $_POST['supplier_currency'] ) ) : 'EUR';
                         $settings['shop_currency']     = isset( $_POST['shop_currency'] ) ? sanitize_text_field( wp_unslash( $_POST['shop_currency'] ) ) : 'RUB';
                         $settings['currency_rate_mode'] = isset( $_POST['currency_rate_mode'] ) ? sanitize_text_field( wp_unslash( $_POST['currency_rate_mode'] ) ) : 'manual';

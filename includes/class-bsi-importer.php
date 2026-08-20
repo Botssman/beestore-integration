@@ -37,6 +37,8 @@ class BSI_Importer {
         private function __construct() {
                 // Cron hook импорта.
                 add_action( 'bsi_cron_import_catalog', array( $this, 'cron_import' ) );
+                // Cron hook полного каталога (ежедневно).
+                add_action( 'bsi_cron_full_import', array( $this, 'cron_full_import' ) );
                 // Cron hook синхронизации остатков (отдельная, быстрая).
                 add_action( 'bsi_cron_stock_sync', array( $this, 'cron_stock_sync' ) );
                 // AJAX/ручной запуск.
@@ -1452,7 +1454,7 @@ class BSI_Importer {
                                 break;
                         }
 
-                        $result = BSI_FTP::instance()->fetch_latest_zip();
+                        $result = BSI_FTP::instance()->fetch_latest_zip( 'incremental' );
                         if ( is_wp_error( $result ) ) {
                                 // Нет следующего файла (bsi_no_new_files) — всё обработано.
                                 $code = $result->get_error_code();
@@ -1491,6 +1493,52 @@ class BSI_Importer {
                                 'elapsed'   => round( microtime( true ) - $started, 1 ),
                         ) );
                 }
+        }
+
+        /* ---------------------------------------------------------------------
+         * Ежедневный импорт ПОЛНОГО каталога (BSI_0000001).
+         * Запускается cron раз в сутки (по настройке time_full_import, по умолчанию 02:00).
+         * Отдельно от инкрементальных — большой файл обрабатывается один раз в день.
+         * --------------------------------------------------------------------- */
+        public function cron_full_import() {
+                $settings = get_option( 'bsi_settings', array() );
+                $freq = isset( $settings['full_sync_frequency'] ) ? $settings['full_sync_frequency'] : 'daily';
+                if ( 'disabled' === $freq ) {
+                        return;
+                }
+
+                // Как и инкрементальный — не конфликтуем с другим импортом.
+                $lock = get_transient( 'bsi_import_lock' );
+                if ( false !== $lock ) {
+                        $lock_age = time() - (int) $lock;
+                        if ( $lock_age < 1800 ) {
+                                $this->log( 'info', 'Cron полный: импорт уже идёт — пропускаем', array( 'lock_age' => $lock_age ) );
+                                return;
+                        }
+                        delete_transient( 'bsi_import_lock' );
+                        delete_transient( 'bsi_import_lock_pid' );
+                }
+
+                $this->log( 'info', 'Запуск ежедневного полного импорта каталога' );
+
+                $result = BSI_FTP::instance()->fetch_latest_zip( 'full' );
+                if ( is_wp_error( $result ) ) {
+                        $this->log( 'warning', 'Cron полный: нет полного файла', array(
+                                'err' => $result->get_error_message(),
+                        ) );
+                        return;
+                }
+
+                // Импортируем полный каталог (замена).
+                $this->import_csv_file( $result['csv'], $result['zip'] );
+
+                // Пометим как обработанный.
+                $file_to_mark = $result['zip'] ? $result['zip'] : $result['csv'];
+                BSI_FTP::instance()->mark_processed( $file_to_mark );
+
+                $this->log( 'info', 'Cron полный: каталог импортирован', array(
+                        'file' => basename( $result['remote_name'] ),
+                ) );
         }
 
         /* ---------------------------------------------------------------------

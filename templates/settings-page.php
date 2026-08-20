@@ -41,6 +41,8 @@ $download_images       = ! isset( $settings['download_images'] ) || '1' === $set
 $sync_frequency        = isset( $settings['sync_frequency'] ) ? $settings['sync_frequency'] : 'hourly';
 $status_sync_frequency = isset( $settings['status_sync_frequency'] ) ? $settings['status_sync_frequency'] : 'hourly';
 $stock_sync_frequency  = isset( $settings['stock_sync_frequency'] ) ? $settings['stock_sync_frequency'] : 'disabled';
+$full_sync_frequency   = isset( $settings['full_sync_frequency'] ) ? $settings['full_sync_frequency'] : 'daily';
+$full_import_time      = isset( $settings['full_import_time'] ) ? $settings['full_import_time'] : '02:00';
 $import_batch_size     = isset( $settings['import_batch_size'] ) ? $settings['import_batch_size'] : 200;
 $id_tipo_incasso_default = isset( $settings['id_tipo_incasso_default'] ) ? $settings['id_tipo_incasso_default'] : 3;
 $log_level             = isset( $settings['log_level'] ) ? $settings['log_level'] : 'info';
@@ -274,6 +276,18 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                                         ?>
                                                 </select>
                                                 <p class="description"><?php esc_html_e( 'Скачивает инкрементальный CSV и обновляет остаток у вариаций. Новые вариации создаются с картинкой. Работает отдельно от импорта каталога.', 'beestore-integration' ); ?></p>
+                                        </td>
+                                </tr>
+                                <tr>
+                                        <th><label for="full_import_time"><?php esc_html_e( 'Импорт полного каталога (_0000001)', 'beestore-integration' ); ?></label></th>
+                                        <td>
+                                                <select name="bsi_settings[full_sync_frequency]" id="full_sync_frequency">
+                                                        <option value="daily" <?php selected( $full_sync_frequency, 'daily', false ); ?>><?php esc_html_e( 'Раз в день', 'beestore-integration' ); ?></option>
+                                                        <option value="disabled" <?php selected( $full_sync_frequency, 'disabled', false ); ?>><?php esc_html_e( 'Отключено (только вручную)', 'beestore-integration' ); ?></option>
+                                                </select>
+                                                <?php esc_html_e( 'время:', 'beestore-integration' ); ?>
+                                                <input type="time" name="bsi_settings[full_import_time]" id="full_import_time" value="<?php echo esc_attr( $full_import_time ); ?>" step="60">
+                                                <p class="description"><?php esc_html_e( 'Большой файл (все товары, ~57 000 строк) обрабатывается раз в день в указанное время. Инкрементальные файлы (_0000002+) обрабатываются по «Частоте импорта каталога».', 'beestore-integration' ); ?></p>
                                         </td>
                                 </tr>
                                 <tr>

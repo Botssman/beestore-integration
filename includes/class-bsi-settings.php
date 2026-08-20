@@ -199,6 +199,8 @@ class BSI_Settings {
                 $output['sync_frequency']        = isset( $input['sync_frequency'] ) ? sanitize_text_field( $input['sync_frequency'] ) : 'hourly';
                 $output['status_sync_frequency'] = isset( $input['status_sync_frequency'] ) ? sanitize_text_field( $input['status_sync_frequency'] ) : 'hourly';
                 $output['stock_sync_frequency']  = isset( $input['stock_sync_frequency'] ) ? sanitize_text_field( $input['stock_sync_frequency'] ) : 'disabled';
+                $output['full_sync_frequency']  = isset( $input['full_sync_frequency'] ) ? sanitize_text_field( $input['full_sync_frequency'] ) : 'daily';
+                $output['full_import_time']     = isset( $input['full_import_time'] ) ? sanitize_text_field( $input['full_import_time'] ) : '02:00';
                 $output['import_batch_size']     = isset( $input['import_batch_size'] ) ? absint( $input['import_batch_size'] ) : 200;
                 $output['id_tipo_incasso_default'] = isset( $input['id_tipo_incasso_default'] ) ? absint( $input['id_tipo_incasso_default'] ) : 3;
                 $output['log_level']             = isset( $input['log_level'] ) ? sanitize_text_field( $input['log_level'] ) : 'info';

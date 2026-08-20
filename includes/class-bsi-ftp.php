@@ -306,9 +306,12 @@ class BSI_FTP {
          *   - .zip   — архив с CSV внутри (нужно распаковать)
          *   - .csv   — голый CSV-файл (по письму Sirio)
          *
-         * @return array|WP_Error  [ 'zip' => local_zip_path|'', 'csv' => extracted_csv_path, 'remote_name' => name ]
+         * @param string $type  all | incremental | full.
+         *   - 'incremental' — только _0000002+ (инкрементальные)
+         *   - 'full'        — только _0000001 (полный каталог)
+         * @return array|WP_Error  [ 'zip' => local_zip_path|'', 'csv' => local_csv_path, 'remote_name' => name ]
          */
-        public function fetch_latest_zip() {
+        public function fetch_latest_zip( $type = 'all' ) {
                 $files = $this->list_remote_zips();
                 if ( is_wp_error( $files ) ) {
                         return $files;
@@ -347,7 +350,25 @@ class BSI_FTP {
                         return strcmp( $a['sort_key'], $b['sort_key'] );
                 } );
 
-                // Ищем последний обработанный файл (по sequence и дате).
+                // Фильтруем по типу файла:
+                //  - incremental → только sequence > 1 (номер 0000002+)
+                //  - full        → только sequence == 1 (0000001)
+                if ( 'incremental' === $type ) {
+                        $parsed = array_values( array_filter( $parsed, function ( $p ) {
+                                return $p['sequence'] > 1;
+                        } ) );
+                } elseif ( 'full' === $type ) {
+                        $parsed = array_values( array_filter( $parsed, function ( $p ) {
+                                return 1 === $p['sequence'];
+                        } ) );
+                }
+
+                if ( empty( $parsed ) ) {
+                        return new WP_Error(
+                                'bsi_no_new_files',
+                                __( 'Файлов нужного типа (полный/инкрементальный) на FTP нет.', 'beestore-integration' )
+                        );
+                }
                 $processed_dir = $this->get_processed_dir();
                 $last_processed = null;
                 if ( is_dir( $processed_dir ) ) {

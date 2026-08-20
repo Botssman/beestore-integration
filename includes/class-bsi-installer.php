@@ -48,6 +48,8 @@ class BSI_Installer {
                                 'sync_frequency'     => 'every15min',
                                 'status_sync_frequency' => 'hourly',
                                 'stock_sync_frequency' => 'every15min',
+                                'full_sync_frequency'  => 'daily',
+                                'full_import_time'     => '02:00',
                                 'import_batch_size'  => 25,
                                 'download_images'    => '1',
                                 'delete_out_of_stock' => '0', // Если 1 — снимать с публикации товары, отсутствующие в выгрузке.
@@ -233,6 +235,19 @@ class BSI_Installer {
                 if ( ! wp_next_scheduled( 'bsi_cron_refresh_rate' ) ) {
                         wp_schedule_event( strtotime( 'tomorrow 06:00' ), 'daily', 'bsi_cron_refresh_rate' );
                 }
+                // Ежедневный полный импорт каталога (по умолчанию в 02:00).
+                if ( ! wp_next_scheduled( 'bsi_cron_full_import' ) ) {
+                        $settings = get_option( 'bsi_settings', array() );
+                        $time = isset( $settings['full_import_time'] ) ? $settings['full_import_time'] : '02:00';
+                        $ts   = strtotime( 'today ' . $time );
+                        if ( $ts && $ts < time() ) {
+                                $ts = strtotime( 'tomorrow ' . $time );
+                        }
+                        if ( ! $ts ) {
+                                $ts = strtotime( 'tomorrow 02:00' );
+                        }
+                        wp_schedule_event( $ts, 'daily', 'bsi_cron_full_import' );
+                }
         }
 
         /**
@@ -273,6 +288,34 @@ class BSI_Installer {
                 foreach ( $freqs as $hook => $freq ) {
                         self::reschedule( $hook, $freq, $settings );
                 }
+
+                // Полный импорт — ежедневный, но с настраиваемым временем.
+                self::reschedule_full_import();
+        }
+
+        /**
+         * Перезапланировать ежедневный импорт полного каталога (bsi_cron_full_import)
+         * согласно настройке full_import_time (например '02:00') / full_sync_frequency.
+         */
+        public static function reschedule_full_import() {
+                $settings = get_option( 'bsi_settings', array() );
+                $freq = isset( $settings['full_sync_frequency'] ) ? $settings['full_sync_frequency'] : 'daily';
+
+                wp_clear_scheduled_hook( 'bsi_cron_full_import' );
+
+                if ( 'disabled' === $freq || ! $freq ) {
+                        return;
+                }
+
+                $time = isset( $settings['full_import_time'] ) ? $settings['full_import_time'] : '02:00';
+                $ts   = strtotime( 'today ' . $time );
+                if ( $ts && $ts < time() ) {
+                        $ts = strtotime( 'tomorrow ' . $time );
+                }
+                if ( ! $ts ) {
+                        $ts = strtotime( 'tomorrow 02:00' );
+                }
+                wp_schedule_event( $ts, 'daily', 'bsi_cron_full_import' );
         }
 
         /**
@@ -284,5 +327,6 @@ class BSI_Installer {
                 wp_clear_scheduled_hook( 'bsi_cron_stock_sync' );
                 wp_clear_scheduled_hook( 'bsi_cron_process_queue' );
                 wp_clear_scheduled_hook( 'bsi_cron_refresh_rate' );
+                wp_clear_scheduled_hook( 'bsi_cron_full_import' );
         }
 }

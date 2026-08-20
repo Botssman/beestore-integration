@@ -1431,18 +1431,65 @@ class BSI_Importer {
 
                 $this->log( 'info', 'Запуск cron-импорта каталога' );
 
-                $result = BSI_FTP::instance()->fetch_latest_zip();
-                if ( is_wp_error( $result ) ) {
-                        $this->log( 'info', 'Нет новых файлов для импорта: ' . $result->get_error_message() );
-                        return;
+                // Обрабатываем ВСЕ накопившиеся файлы по очереди за один запуск.
+                // Инкрементальные файлы приходят каждые 15 минут, а cron (часто раз
+                // в час) — поэтому важно за раз обработать все, что накопились.
+                $processed_count = 0;
+                $failed_count    = 0;
+                $max_files       = 100;   // защита от невозможного количества.
+                $max_seconds     = 55;    // максимальная длительность одного cron (иначе таймаут).
+
+                $started = microtime( true );
+
+                while ( $processed_count < $max_files ) {
+                        // Прерываемся по времени — вдруг много файлов.
+                        if ( ( microtime( true ) - $started ) > $max_seconds ) {
+                                $this->log( 'info', 'Cron импорт: лимит времени достигнут', array(
+                                        'processed' => $processed_count,
+                                        'elapsed'   => round( microtime( true ) - $started, 1 ),
+                                ) );
+                                break;
+                        }
+
+                        $result = BSI_FTP::instance()->fetch_latest_zip();
+                        if ( is_wp_error( $result ) ) {
+                                // Нет следующего файла (bsi_no_new_files) — всё обработано.
+                                $code = $result->get_error_code();
+                                if ( 'bsi_no_new_files' === $code ) {
+                                        $this->log( 'info', 'Cron: новых файлов больше нет', array(
+                                                'processed' => $processed_count,
+                                        ) );
+                                        break;
+                                }
+                                $this->log( 'warning', 'Cron: ошибка выборки файла', array(
+                                        'err' => $result->get_error_message(),
+                                ) );
+                                $failed_count++;
+                                if ( $failed_count >= 3 ) {
+                                        break; // Защита от цикла при повторных ошибках.
+                                }
+                                continue;
+                        }
+
+                        $this->import_csv_file( $result['csv'], $result['zip'] );
+
+                        // Пометить как обработанный.
+                        $file_to_mark = $result['zip'] ? $result['zip'] : $result['csv'];
+                        BSI_FTP::instance()->mark_processed( $file_to_mark );
+
+                        $processed_count++;
+                        $this->log( 'info', 'Cron: файл обработан', array(
+                                'name'      => basename( $result['remote_name'] ),
+                                'processed' => $processed_count,
+                        ) );
                 }
 
-                $this->import_csv_file( $result['csv'], $result['zip'] );
-
-                // Пометить как обработанный.
-                // Для голого CSV (zip='') mark_processed берёт сам csv_path.
-                $file_to_mark = $result['zip'] ? $result['zip'] : $result['csv'];
-                BSI_FTP::instance()->mark_processed( $file_to_mark );
+                if ( $processed_count > 0 ) {
+                        $this->log( 'info', 'Cron: импорт всех накопившихся файлов завершён', array(
+                                'processed' => $processed_count,
+                                'elapsed'   => round( microtime( true ) - $started, 1 ),
+                        ) );
+                }
         }
 
         /* ---------------------------------------------------------------------

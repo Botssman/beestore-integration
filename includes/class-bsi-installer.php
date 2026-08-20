@@ -45,9 +45,9 @@ class BSI_Installer {
                                 'enable_order_sync'  => '1',
                                 'enable_status_sync' => '1',
                                 'enable_realtime_stock' => '0',
-                                'sync_frequency'     => 'hourly',
+                                'sync_frequency'     => 'every15min',
                                 'status_sync_frequency' => 'hourly',
-                                'stock_sync_frequency' => 'disabled',
+                                'stock_sync_frequency' => 'every15min',
                                 'import_batch_size'  => 25,
                                 'download_images'    => '1',
                                 'delete_out_of_stock' => '0', // Если 1 — снимать с публикации товары, отсутствующие в выгрузке.

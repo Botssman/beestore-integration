@@ -590,12 +590,20 @@ class BSI_Importer {
                                         continue;
                                 }
 
+                                // Определяем ПРИЧИНУ ДО пересоздания — когда карта хешей ещё
+                                // от прошлого импорта (иначе после upsert карта станет новой
+                                // и причина покажет «неизвестная» вместо реальной).
+                                $given_reason = '';
+                                if ( $existing_id ) {
+                                        $given_reason = $this->unchanged_reason( $existing_id, $data['variants'] );
+                                }
+
                                 $this->upsert_model( $igu, $data['parent'], $data['variants'], $is_multi_variant );
                                 BSI_Import_Filters::instance()->increment_counters( $category, $brand );
                                 if ( $existing_id ) {
                                         $batch_updated++;
                                         $item_name = ( ! empty( $data['parent']['DSArticoloAgg'] ) ) ? $data['parent']['DSArticoloAgg'] : ( ! empty( $data['parent']['DSArticolo'] ) ? $data['parent']['DSArticolo'] : $igu );
-                                        $reason     = $this->unchanged_reason( $existing_id, $data['variants'] );
+                                        $reason     = $given_reason;
                                         // Собираем для показа на странице импорта (живая лента).
                                         $batch_updated_items[] = array(
                                                 'igu'      => $igu,

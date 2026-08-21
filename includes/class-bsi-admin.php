@@ -159,7 +159,7 @@ class BSI_Admin {
                         // Принудительно включаем конвертацию (теперь это обязательно).
                         $settings['enable_price_conversion'] = '1';
 
-                        // ─── Новая логика расчёта цен (мин. доходность + курс евро) ───
+                        // ─── Сохранение расчёта цен (мин. доходность + курс евро) ───
                         $pricing_opts = get_option( 'bsi_pricing', array() );
                         $min_income   = isset( $_POST['pricing_min_income'] ) ? floatval( wp_unslash( $_POST['pricing_min_income'] ) ) : 0;
                         $pricing_opts['min_income'] = $min_income >= 0 ? $min_income : 0;
@@ -170,34 +170,6 @@ class BSI_Admin {
                         if ( class_exists( 'BSI_Pricing' ) ) {
                                 BSI_Pricing::instance()->flush_settings_cache();
                         }
-
-                        $settings['supplier_currency'] = isset( $_POST['supplier_currency'] ) ? sanitize_text_field( wp_unslash( $_POST['supplier_currency'] ) ) : 'EUR';
-                        $settings['shop_currency']     = isset( $_POST['shop_currency'] ) ? sanitize_text_field( wp_unslash( $_POST['shop_currency'] ) ) : 'RUB';
-                        $settings['currency_rate_mode'] = isset( $_POST['currency_rate_mode'] ) ? sanitize_text_field( wp_unslash( $_POST['currency_rate_mode'] ) ) : 'manual';
-                        $settings['currency_rate_auto_source'] = isset( $_POST['currency_rate_auto_source'] ) ? sanitize_text_field( wp_unslash( $_POST['currency_rate_auto_source'] ) ) : 'auto';
-
-                        // ВАЖНО: с v1.6.4 авто-курс хранится в ОТДЕЛЬНОЙ опции 'bsi_currency_rate_auto'.
-                        // Форма настроек его вообще не трогает — только AJAX-кнопка и cron.
-                        // Поэтому здесь:
-                        //  - В авто-режиме: вообще не пишем currency_rate в bsi_settings.
-                        //  - В ручном режиме: пишем currency_rate из формы в bsi_settings.
-
-                        if ( 'manual' === $settings['currency_rate_mode'] ) {
-                                // Ручной режим: берём курс из формы.
-                                $rate = isset( $_POST['currency_rate'] ) ? floatval( wp_unslash( $_POST['currency_rate'] ) ) : 1;
-                                $settings['currency_rate'] = $rate > 0 ? $rate : 1;
-                        } else {
-                                // Авто-режим: не трогаем ни bsi_settings['currency_rate'],
-                                // ни bsi_currency_rate_auto. Курс управляется AJAX-кнопкой.
-                                // На всякий случай — если в bsi_settings ещё остался старый
-                                // currency_rate из предыдущих версий, не трогаем его.
-                        }
-
-                        $markup = isset( $_POST['markup_coefficient'] ) ? floatval( wp_unslash( $_POST['markup_coefficient'] ) ) : 1;
-                        $fixed  = isset( $_POST['fixed_markup'] ) ? floatval( wp_unslash( $_POST['fixed_markup'] ) ) : 0;
-                        $settings['markup_coefficient'] = $markup > 0 ? $markup : 1;
-                        $settings['fixed_markup']       = $fixed;
-                        $settings['round_prices']       = isset( $_POST['round_prices'] ) ? '1' : '0';
 
                         update_option( 'bsi_settings', $settings );
                         echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Настройки конвертации цен сохранены.', 'beestore-integration' ) . '</p></div>';

@@ -193,23 +193,69 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Импорт уже идёт. Обновите страницу.', 'beestore-integration' ) ) );
                 }
 
-                // СНАЧАЛА ищем уже скачанный CSV во всех папках.
+                // ─── НОВАЯ ЛОГИКА: сначала проверяем FTP на свежий файл ─────────
+                // 1. Запрашиваем список файлов с FTP
+                // 2. Если на FTP есть файл новее чем локальный — скачиваем
+                // 3. Если FTP недоступен или новых файлов нет — используем локальный
+                // Это гарантирует что всегда импортируется самый свежий каталог.
+
                 $upload_dir    = wp_upload_dir();
                 $beestore_dir  = trailingslashit( $upload_dir['basedir'] ) . 'beestore';
                 $dirs_to_check = array( 'downloads', 'extracted', 'processed', 'manual-downloads' );
 
-                $csvs = array();
+                // Собираем все локальные CSV.
+                $local_csvs = array();
                 foreach ( $dirs_to_check as $subdir ) {
                         $path = $beestore_dir . '/' . $subdir;
                         if ( is_dir( $path ) ) {
-                                $csvs = array_merge( $csvs, glob( $path . '/*.csv' ) );
-                                $csvs = array_merge( $csvs, glob( $path . '/*/*.csv' ) );
+                                $local_csvs = array_merge( $local_csvs, glob( $path . '/*.csv' ) );
+                                $local_csvs = array_merge( $local_csvs, glob( $path . '/*/*.csv' ) );
                         }
                 }
 
-                if ( ! empty( $csvs ) ) {
-                        // Приоритет: файл с _0000001 в имени (полный каталог).
-                        $full_catalog = array_filter( $csvs, function( $f ) {
+                // Определяем sort_key самого свежего локального файла.
+                $local_latest_sort_key = '';
+                $local_latest_name = '';
+                foreach ( $local_csvs as $local_csv ) {
+                        $local_name = basename( $local_csv );
+                        if ( preg_match( '/^COMPANY_(\d+)_0000_([0-9\-]+)_([0-9\-]+)_(\d+)\.(zip|csv)$/i', $local_name, $m ) ) {
+                                $sort_key = $m[2] . '_' . $m[3]; // date_time
+                                if ( strcmp( $sort_key, $local_latest_sort_key ) > 0 ) {
+                                        $local_latest_sort_key = $sort_key;
+                                        $local_latest_name = $local_name;
+                                }
+                        }
+                }
+
+                // Пытаемся получить свежий файл с FTP.
+                $csv_file = '';
+                $remote_name = '';
+                $ftp_status = '';
+
+                if ( function_exists( 'set_time_limit' ) ) {
+                        @set_time_limit( 600 );
+                }
+                $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
+
+                if ( is_wp_error( $fetch_result ) ) {
+                        // FTP недоступен или новых файлов нет — используем локальный.
+                        $ftp_status = $fetch_result->get_error_message();
+                        BSI_Logger::instance()->warn( 'importer', 'FTP недоступен, используем локальный CSV', array(
+                                'err' => $ftp_status,
+                                'local_latest' => $local_latest_name,
+                        ) );
+
+                        if ( empty( $local_csvs ) ) {
+                                wp_send_json_error( array(
+                                        'message' => sprintf(
+                                                __( 'FTP недоступен: %s. Локальных CSV файлов тоже нет. Проверьте настройки FTP.', 'beestore-integration' ),
+                                                $ftp_status
+                                        ),
+                                ) );
+                        }
+
+                        // Используем самый свежий локальный файл.
+                        $full_catalog = array_filter( $local_csvs, function( $f ) {
                                 return false !== strpos( basename( $f ), '_0000001.' );
                         });
                         if ( ! empty( $full_catalog ) ) {
@@ -218,23 +264,20 @@ class BSI_Importer {
                                 });
                                 $csv_file = $full_catalog[0];
                         } else {
-                                usort( $csvs, function( $a, $b ) {
+                                usort( $local_csvs, function( $a, $b ) {
                                         return filemtime( $b ) - filemtime( $a );
                                 });
-                                $csv_file = $csvs[0];
+                                $csv_file = $local_csvs[0];
                         }
                         $remote_name = basename( $csv_file );
                 } else {
-                        // CSV нет — скачиваем с FTP.
-                        if ( function_exists( 'set_time_limit' ) ) {
-                                @set_time_limit( 600 );
-                        }
-                        $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
-                        if ( is_wp_error( $fetch_result ) ) {
-                                wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
-                        }
+                        // FTP доступен —fresh файл скачан.
                         $csv_file    = $fetch_result['csv'];
                         $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
+                        BSI_Logger::instance()->info( 'importer', 'Свежий CSV скачан с FTP', array(
+                                'remote_name' => $remote_name,
+                                'local_latest' => $local_latest_name,
+                        ) );
                 }
 
                 // Считаем количество строк.

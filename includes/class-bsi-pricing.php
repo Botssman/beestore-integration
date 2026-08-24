@@ -204,24 +204,23 @@ class BSI_Pricing {
                 $discount = (int) $r['discount'];
 
                 if ( $discount > 0 && $r['new_price'] > 0 ) {
-                        // Скидка есть: old_price (точное) → regular, new_price (округлённое) → sale.
+                        // Скидка ЕСТЬ: показываем зачёркнутую старую цену и новую со скидкой.
+                        // old_price (точное) → regular (зачёркнутая)
+                        // new_price (округлённое вверх до 100) → sale (текущая)
                         $product->set_regular_price( wc_format_decimal( $r['old_price'], 2 ) );
                         $product->set_sale_price( wc_format_decimal( $r['new_price'], 2 ) );
                         $product->set_price( wc_format_decimal( $r['new_price'], 2 ) );
                 } else {
-                        // Скидки нет: regular_price (точное) → regular, new_price (округлённое) → sale.
-                        // В Excel при I=0: H = regular, J = CEILING(H, 100) = sale.
-                        // То есть даже без скидки sale_price = округлённое значение,
-                        // а regular_price = точное (старая цена показывается зачёркнутой).
-                        $product->set_regular_price( wc_format_decimal( $r['regular_price'], 2 ) );
-                        // Если regular_price и new_price одинаковые (кратно 100) — не ставим sale_price.
-                        if ( isset( $r['new_price'] ) && $r['new_price'] > 0 && $r['new_price'] != $r['regular_price'] ) {
-                                $product->set_sale_price( wc_format_decimal( $r['new_price'], 2 ) );
-                                $product->set_price( wc_format_decimal( $r['new_price'], 2 ) );
-                        } else {
-                                $product->set_sale_price( '' );
-                                $product->set_price( wc_format_decimal( $r['regular_price'], 2 ) );
-                        }
+                        // Скидки НЕТ: регулярная цена = округлённая вверх (J в Excel),
+                        // sale_price не ставим (нет скидки).
+                        // В Excel при I=0: J = CEILING(H, 100) — это и есть финальная цена.
+                        // Пример: H=47214 → J=47300 → regular=47300, sale=нет.
+                        $rounded_regular = isset( $r['new_price'] ) && $r['new_price'] > 0
+                                ? $r['new_price']
+                                : $r['regular_price'];
+                        $product->set_regular_price( wc_format_decimal( $rounded_regular, 2 ) );
+                        $product->set_sale_price( '' );
+                        $product->set_price( wc_format_decimal( $rounded_regular, 2 ) );
                 }
 
                 $product->update_meta_data( '_pricing_discount', $discount );

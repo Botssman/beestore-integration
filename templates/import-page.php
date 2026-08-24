@@ -21,6 +21,17 @@ $percent = $state['total_rows'] > 0
         ? round( ( $state['processed_rows'] / $state['total_rows'] ) * 100, 1 )
         : 0;
 
+// Проверяем: идёт ли импорт в ДРУГОЙ вкладке (свежий last_update).
+// Если last_update было > 60 сек назад — значит предыдущая вкладка закрылась,
+// и эта вкладка должна подхватить импорт (запустить startBatchLoop).
+$import_is_stale = false;
+if ( 'running' === $state['status'] && ! empty( $state['last_update'] ) ) {
+        $last_ts = strtotime( $state['last_update'] );
+        if ( $last_ts > 0 ) {
+                $import_is_stale = ( time() - $last_ts ) > 60;
+        }
+}
+
 // Статус на русском.
 $status_labels = array(
         'idle'      => __( 'Нет активного импорта', 'beestore-integration' ),
@@ -184,6 +195,15 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                                         <?php esc_html_e( 'Остановить и сбросить', 'beestore-integration' ); ?>
                                 </button>
                         </p>
+
+                        <!-- Инфо: импорт идёт в другой вкладке -->
+                        <div id="bsi-import-tabs-info" style="display:none;margin-top:15px;background:#fff8e5;border:1px solid #ffb900;border-left:4px solid #ffb900;padding:12px 16px;border-radius:4px;">
+                                <p style="margin:0;">
+                                        <span class="dashicons dashicons-info" style="color:#ffb900;vertical-align:middle;"></span>
+                                        <strong><?php esc_html_e( 'Импорт уже идёт в другой вкладке браузера.', 'beestore-integration' ); ?></strong>
+                                        <?php esc_html_e( 'Эта вкладка работает в режиме наблюдения — статус обновляется автоматически. Если закрыть вкладку с импортом — эта вкладка автоматически подхватит обработку через 60 секунд.', 'beestore-integration' ); ?>
+                                </p>
+                        </div>
 
                         <!-- Лог в реальном времени -->
                         <div id="bsi-realtime-log" style="margin-top:15px;display:none;">
@@ -369,8 +389,21 @@ jQuery(document).ready(function($){
                 updateUI(state, <?php echo $percent; ?>);
 
                 if (state.status === 'running') {
-                        startBatchLoop();
-                        startPolling();
+                        // Проверяем (через PHP) — свежий ли last_update.
+                        // Если > 60 сек назад — предыдущая вкладка закрылась, подхватываем.
+                        // Если < 60 сек — импорт идёт в другой вкладке, только наблюдаем.
+                        var isStale = <?php echo $import_is_stale ? 'true' : 'false'; ?>;
+
+                        if (isStale) {
+                                // Предыдущая вкладка закрылась — подхватываем импорт.
+                                startBatchLoop();
+                                startPolling();
+                        } else {
+                                // Импорт идёт в другой вкладке — только наблюдаем.
+                                startPolling();
+                                $('#bsi-btn-start').prop('disabled', true);
+                                $('#bsi-import-tabs-info').show();
+                        }
                 }
         }
 

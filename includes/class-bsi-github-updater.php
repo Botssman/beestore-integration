@@ -43,8 +43,53 @@ class BSI_GitHub_Updater {
                 add_filter( 'pre_set_site_transient_update_plugins', array( $this, 'check_update' ) );
                 add_filter( 'plugins_api', array( $this, 'plugin_info' ), 20, 3 );
 
+                // Очистка кешей после установки обновления — иначе WP продолжит
+                // показывать кнопку "Обновить" даже после успешной установки.
+                add_action( 'upgrader_process_complete', array( $this, 'clear_caches_after_update' ), 10, 2 );
+
                 // AJAX: принудительная проверка обновления (для кнопки в админке).
                 add_action( 'wp_ajax_bsi_check_github_update', array( $this, 'ajax_check_update' ) );
+        }
+
+        /**
+         * Очистка кешей после установки обновления плагина.
+         *
+         * WordPress сбрасывает transient 'update_plugins' автоматически,
+         * но наш кеш 'bsi_github_latest_release' (1 час) и 'bsi_github_readme'
+         * (1 день) НЕ сбрасываются. Из-за этого на странице плагинов
+         * кнопка "Обновить" может оставаться видимой до 1 часа после установки.
+         *
+         * Также принудительно сбрасываем 'update_plugins' transient на случай
+         * если WP не сделал этого (бывает на shared hosting с object cache).
+         */
+        public function clear_caches_after_update( $upgrader, $hook_extra ) {
+                // Проверяем что это обновление плагина и наш плагин.
+                if ( ! isset( $hook_extra['action'] ) || 'update' !== $hook_extra['action'] ) {
+                        return;
+                }
+                if ( ! isset( $hook_extra['type'] ) || 'plugin' !== $hook_extra['type'] ) {
+                        return;
+                }
+                // Если update_plugins — проверяем что это наш плагин.
+                if ( isset( $hook_extra['plugins'] ) ) {
+                        $updated = (array) $hook_extra['plugins'];
+                        if ( ! in_array( $this->basename, $updated, true ) ) {
+                                return;
+                        }
+                }
+
+                // Очищаем ВСЕ наши кеши.
+                delete_transient( 'bsi_github_latest_release' );
+                delete_transient( 'bsi_github_readme' );
+
+                // Принудительно сбрасываем transient update_plugins.
+                delete_site_transient( 'update_plugins' );
+
+                if ( class_exists( 'BSI_Logger' ) ) {
+                        BSI_Logger::instance()->info( 'updater', 'Кеши обновлений очищены после установки', array(
+                                'plugin' => $this->basename,
+                        ) );
+                }
         }
 
         /**

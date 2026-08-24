@@ -156,12 +156,12 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                                         <th><?php esc_html_e( 'Отфильтровано (вне фильтров):', 'beestore-integration' ); ?></th>
                                         <td id="bsi-filtered-products"><?php echo esc_html( number_format_i18n( $state['filtered_products'] ) ); ?></td>
                                 </tr>
-					<tr>
-						<th>Снято с публикации (отсутствуют в выгрузке):</th>
-						<td id="bsi-deactivated-products" style="color:#b88000;font-weight:600;">
-							0
-						</td>
-					</tr>
+                                        <tr>
+                                                <th>Снято с публикации (отсутствуют в выгрузке):</th>
+                                                <td id="bsi-deactivated-products" style="color:#b88000;font-weight:600;">
+                                                        0
+                                                </td>
+                                        </tr>
                                 <tr>
                                         <th><?php esc_html_e( 'Ошибок:', 'beestore-integration' ); ?></th>
                                         <td>
@@ -201,17 +201,7 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                                         <?php esc_html_e( 'Остановить и сбросить', 'beestore-integration' ); ?>
                                 </button>
                         </p>
-
-                        <!-- Инфо: импорт идёт в другой вкладке -->
-                        <div id="bsi-import-tabs-info" style="display:none;margin-top:15px;background:#fff8e5;border:1px solid #ffb900;border-left:4px solid #ffb900;padding:12px 16px;border-radius:4px;">
-                                <p style="margin:0;">
-                                        <span class="dashicons dashicons-info" style="color:#ffb900;vertical-align:middle;"></span>
-                                        <strong><?php esc_html_e( 'Импорт уже идёт в другой вкладке браузера.', 'beestore-integration' ); ?></strong>
-                                        <?php esc_html_e( 'Эта вкладка работает в режиме наблюдения — статус обновляется автоматически. Если закрыть вкладку с импортом — эта вкладка автоматически подхватит обработку через 60 секунд.', 'beestore-integration' ); ?>
-                                </p>
-                        </div>
-
-                        <!-- Лог в реальном времени -->
+			<!-- Лог в реальном времени --><!-- Лог в реальном времени -->
                         <div id="bsi-realtime-log" style="margin-top:15px;display:none;">
                                 <h4><?php esc_html_e( 'Лог в реальном времени:', 'beestore-integration' ); ?></h4>
                                 <pre class="bsi-log-output" style="max-height:200px;overflow:auto;background:#1e1e1e;color:#0f0;padding:10px;border-radius:4px;font-size:11px;"></pre>
@@ -398,17 +388,13 @@ jQuery(document).ready(function($){
                         // Проверяем (через PHP) — свежий ли last_update.
                         // Если > 60 сек назад — предыдущая вкладка закрылась, подхватываем.
                         // Если < 60 сек — импорт идёт в другой вкладке, только наблюдаем.
+                        // В обоих случаях запускаем polling — чтобы видеть актуальный статус.
                         var isStale = <?php echo $import_is_stale ? 'true' : 'false'; ?>;
 
+                        startPolling();
                         if (isStale) {
                                 // Предыдущая вкладка закрылась — подхватываем импорт.
                                 startBatchLoop();
-                                startPolling();
-                        } else {
-                                // Импорт идёт в другой вкладке — только наблюдаем.
-                                startPolling();
-                                $('#bsi-btn-start').prop('disabled', true);
-                                $('#bsi-import-tabs-info').show();
                         }
                 }
         }
@@ -458,7 +444,7 @@ jQuery(document).ready(function($){
                 $('#bsi-updated-products').text(state.updated_products.toLocaleString('ru-RU'));
                 $('#bsi-skipped-products').text((state.skipped_products || 0).toLocaleString('ru-RU'));
                 $('#bsi-filtered-products').text((state.filtered_products || 0).toLocaleString('ru-RU'));
-		$('#bsi-deactivated-products').text((state.deactivated_products || 0).toLocaleString('ru-RU'));
+                $('#bsi-deactivated-products').text((state.deactivated_products || 0).toLocaleString('ru-RU'));
                 $('#bsi-errors-count').text(state.errors_count.toLocaleString('ru-RU'));
                 $('#bsi-errors-count').css('color', state.errors_count > 0 ? '#c62828' : '#666');
                 if (state.last_error) {

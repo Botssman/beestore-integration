@@ -79,6 +79,10 @@ $pricing_settings = class_exists( 'BSI_Pricing' ) ? BSI_Pricing::instance()->get
                                 <span class="dashicons dashicons-update" style="vertical-align:middle;"></span>
                                 <?php esc_html_e( 'Пересчитать цены сейчас', 'beestore-integration' ); ?>
                         </button>
+                        <button type="button" class="button button-secondary" id="bsi-recalc-resume" style="display:none;margin-left:10px;">
+                                <span class="dashicons dashicons-controls-play" style="vertical-align:middle;"></span>
+                                <?php esc_html_e( 'Продолжить с места остановки', 'beestore-integration' ); ?>
+                        </button>
                         <span id="bsi-recalc-status" style="margin-left:15px;"></span>
                 </p>
 
@@ -159,14 +163,15 @@ jQuery(document).ready(function($){
                 $('#bsi-recalc-progress-text').html('<?php esc_html_e( 'Готово.', 'beestore-integration' ); ?>');
         }
 
-        function recalcBatch() {
+        function recalcBatch(retryCount) {
                 if (!recalcState.running) return;
+                retryCount = retryCount || 0;
 
                 $.post(bsiAdmin.ajaxUrl, {
                         action: 'bsi_recalculate_prices',
                         nonce: bsiAdmin.nonce,
                         offset: recalcState.offset,
-                        batch: 100
+                        batch: 25  // уменьшили с 100 до 25 — меньше шансов на timeout
                 }, function(response) {
                         if (!response.success) {
                                 $('#bsi-recalc-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
@@ -185,14 +190,23 @@ jQuery(document).ready(function($){
                         recalcUpdateProgress();
 
                         if (d.has_more) {
-                                recalcBatch();
+                                // Небольшая пауза между батчами — чтобы PHP/MySQL не перегружать.
+                                setTimeout(function() { recalcBatch(0); }, 200);
                         } else {
                                 $('#bsi-recalc-status').html('<span style="color:#2e7d32;">✓ <?php esc_html_e( 'Готово', 'beestore-integration' ); ?></span>');
                                 recalcFinish(true);
                         }
-                }).fail(function(){
-                        $('#bsi-recalc-status').html('<span style="color:#c62828;">✗ AJAX error</span>');
-                        recalcFinish(false);
+                }).fail(function(xhr){
+                        // AJAX error — пробуем retry до 3 раз с паузой 3 сек.
+                        if (retryCount < 3) {
+                                $('#bsi-recalc-status').html('<span style="color:#f57c00;">⚠ AJAX error, retry ' + (retryCount + 1) + '/3 через 3 сек...</span>');
+                                setTimeout(function() { recalcBatch(retryCount + 1); }, 3000);
+                        } else {
+                                $('#bsi-recalc-status').html('<span style="color:#c62828;">✗ AJAX error (3 retries failed). Нажмите «Продолжить» для возобновления.</span>');
+                                recalcFinish(false);
+                                // Показываем кнопку "Продолжить".
+                                $('#bsi-recalc-resume').show();
+                        }
                 });
         }
 
@@ -220,6 +234,17 @@ jQuery(document).ready(function($){
                 $('#bsi-recalc-status').html('<span class="spinner is-active" style="float:none;vertical-align:middle;"></span> <?php esc_html_e( 'Идёт пересчёт...', 'beestore-integration' ); ?>');
 
                 recalcBatch();
+        });
+
+        // ─── Кнопка "Продолжить" — возобновляет с текущего offset ─────────
+        $('#bsi-recalc-resume').on('click', function(){
+                var $btn = $(this);
+                recalcState.running = true;
+                $btn.hide();
+                $('#bsi-recalculate-prices').prop('disabled', true);
+                $('#bsi-recalc-progress').show();
+                $('#bsi-recalc-status').html('<span class="spinner is-active" style="float:none;vertical-align:middle;"></span> <?php esc_html_e( 'Продолжаем с места остановки...', 'beestore-integration' ); ?>');
+                recalcBatch(0);
         });
 });
 </script>

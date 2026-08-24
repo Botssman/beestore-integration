@@ -356,10 +356,18 @@ class BSI_Importer {
                 update_option( 'bsi_last_import_zip', $remote_name );
                 update_option( 'bsi_last_import_started', current_time( 'mysql' ) );
 
+                // Планируем фоновую обработку через WP-Cron.
+                // Если пользователь закроет вкладку — cron подхватит импорт автоматически.
+                // Cron запускается через 2 минуты и проверяет — если last_update устарел
+                // (> 30 сек), значит вкладка закрылась → обрабатывает батчи сам.
+                $next = time() + 120;
+                wp_schedule_single_event( $next, 'bsi_cron_background_batch' );
+
                 $this->log( 'info', 'Старт импорта (новая система с прогрессом)', array(
                         'file'        => $remote_name,
                         'total_rows'  => $total_rows,
                         'is_full'     => $is_full,
+                        'cron_scheduled' => $next,
                 ) );
 
                 wp_send_json_success( array(

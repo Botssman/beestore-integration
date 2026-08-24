@@ -149,19 +149,22 @@ class BSI_Pricing {
                         $discount = 0;
                 }
 
-                // Перевод в рубли, округление только вверх.
-                $base_rub = (int) ( ceil( $base_price * $eur_rate / self::RUB_ROUNDING ) * self::RUB_ROUNDING );
+                // Перевод в рубли — БЕЗ округления (как в Excel формуле H).
+                // Округление ВВЕРХ до 100 применяется ТОЛЬКО к new_price (J в Excel).
+                $base_rub = (int) round( $base_price * $eur_rate );
 
                 if ( $discount > 0 ) {
                         $regular_price = null;
-                        $old_price     = $base_rub;
+                        $old_price     = $base_rub; // точное значение, как H в Excel
+                        // new_price = CEILING(H × (1 - I/100), 100) — округление ВВЕРХ до 100.
                         $new_price     = (int) ( ceil( $base_rub * ( 1 - $discount / 100 ) / self::RUB_ROUNDING ) * self::RUB_ROUNDING );
                         $final_rub     = $new_price;
                 } else {
-                        $regular_price = $base_rub;
+                        $regular_price = $base_rub; // точное значение, как H в Excel
                         $old_price     = null;
-                        $new_price     = null;
-                        $final_rub     = $base_rub;
+                        // Если скидки нет — new_price = CEILING(regular, 100) как в Excel (J при I=0).
+                        $new_price     = (int) ( ceil( $base_rub / self::RUB_ROUNDING ) * self::RUB_ROUNDING );
+                        $final_rub     = $new_price;
                 }
 
                 return array(
@@ -201,13 +204,24 @@ class BSI_Pricing {
                 $discount = (int) $r['discount'];
 
                 if ( $discount > 0 && $r['new_price'] > 0 ) {
+                        // Скидка есть: old_price (точное) → regular, new_price (округлённое) → sale.
                         $product->set_regular_price( wc_format_decimal( $r['old_price'], 2 ) );
                         $product->set_sale_price( wc_format_decimal( $r['new_price'], 2 ) );
                         $product->set_price( wc_format_decimal( $r['new_price'], 2 ) );
                 } else {
+                        // Скидки нет: regular_price (точное) → regular, new_price (округлённое) → sale.
+                        // В Excel при I=0: H = regular, J = CEILING(H, 100) = sale.
+                        // То есть даже без скидки sale_price = округлённое значение,
+                        // а regular_price = точное (старая цена показывается зачёркнутой).
                         $product->set_regular_price( wc_format_decimal( $r['regular_price'], 2 ) );
-                        $product->set_sale_price( '' );
-                        $product->set_price( wc_format_decimal( $r['regular_price'], 2 ) );
+                        // Если regular_price и new_price одинаковые (кратно 100) — не ставим sale_price.
+                        if ( isset( $r['new_price'] ) && $r['new_price'] > 0 && $r['new_price'] != $r['regular_price'] ) {
+                                $product->set_sale_price( wc_format_decimal( $r['new_price'], 2 ) );
+                                $product->set_price( wc_format_decimal( $r['new_price'], 2 ) );
+                        } else {
+                                $product->set_sale_price( '' );
+                                $product->set_price( wc_format_decimal( $r['regular_price'], 2 ) );
+                        }
                 }
 
                 $product->update_meta_data( '_pricing_discount', $discount );

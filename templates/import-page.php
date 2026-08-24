@@ -156,6 +156,12 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                                         <th><?php esc_html_e( 'Отфильтровано (вне фильтров):', 'beestore-integration' ); ?></th>
                                         <td id="bsi-filtered-products"><?php echo esc_html( number_format_i18n( $state['filtered_products'] ) ); ?></td>
                                 </tr>
+					<tr>
+						<th>Снято с публикации (отсутствуют в выгрузке):</th>
+						<td id="bsi-deactivated-products" style="color:#b88000;font-weight:600;">
+							0
+						</td>
+					</tr>
                                 <tr>
                                         <th><?php esc_html_e( 'Ошибок:', 'beestore-integration' ); ?></th>
                                         <td>
@@ -452,6 +458,7 @@ jQuery(document).ready(function($){
                 $('#bsi-updated-products').text(state.updated_products.toLocaleString('ru-RU'));
                 $('#bsi-skipped-products').text((state.skipped_products || 0).toLocaleString('ru-RU'));
                 $('#bsi-filtered-products').text((state.filtered_products || 0).toLocaleString('ru-RU'));
+		$('#bsi-deactivated-products').text((state.deactivated_products || 0).toLocaleString('ru-RU'));
                 $('#bsi-errors-count').text(state.errors_count.toLocaleString('ru-RU'));
                 $('#bsi-errors-count').css('color', state.errors_count > 0 ? '#c62828' : '#666');
                 if (state.last_error) {

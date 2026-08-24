@@ -155,6 +155,7 @@ class BSI_Importer {
                         'updated_products' => 0,
                         'skipped_products' => 0,
                         'filtered_products' => 0,
+                        'deactivated_products' => 0,
                 );
                 return wp_parse_args( $state, $defaults );
         }
@@ -347,6 +348,7 @@ class BSI_Importer {
                         'updated_products'  => 0,
                         'skipped_products'  => 0,
                         'filtered_products' => 0,
+                        'deactivated_products' => 0,
                 );
                 $this->save_import_state( $new_state );
 
@@ -1792,7 +1794,13 @@ class BSI_Importer {
                 // Шаг 2: Если включено delete_out_of_stock — снять с публикации товары,
                 // не встретившиеся в выгрузке.
                 if ( $delete_oos ) {
-                        $this->deactivate_unseen_products();
+                        $deactivated_count = $this->deactivate_unseen_products();
+                        // Сохраняем количество деактивированных товаров в state.
+                        if ( $deactivated_count > 0 ) {
+                                $this->update_import_state( array(
+                                        'deactivated_products' => $deactivated_count,
+                                ) );
+                        }
                 }
 
                 $elapsed = round( microtime( true ) - $start_time, 2 );
@@ -3966,6 +3974,9 @@ class BSI_Importer {
                 }
 
                 $this->log( 'info', 'Сняты с публикации отсутствующие товары', array( 'count' => $deactivated ) );
+
+                // Возвращаем количество деактивированных товаров для отображения в UI.
+                return $deactivated;
         }
 
         /* ---------------------------------------------------------------------

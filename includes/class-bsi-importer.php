@@ -2103,7 +2103,16 @@ class BSI_Importer {
                         }
                 }
 
-                // Все вариации совпали + картинки на месте → товар не изменился.
+                // ─── Проверка meta _bsi_original_purchase ────────────────────
+                // Если meta не сохранена (товар импортирован до v1.9.30) — считаем
+                // товар изменённым, чтобы apply_pricing() сохранил meta и пересчитал
+                // цену по правильной формуле (с floor_price).
+                $original_purchase = get_post_meta( $product_id, '_bsi_original_purchase', true );
+                if ( empty( $original_purchase ) ) {
+                        return false; // Meta нет — нужно обновить (сохранит purchase и пересчитает цену).
+                }
+
+                // Все вариации совпали + картинки на месте + meta есть → товар не изменился.
                 return true;
         }
 

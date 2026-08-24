@@ -4262,13 +4262,16 @@ class BSI_Importer {
                         if ( $pricing ) {
                                 $s     = $pricing->get_settings();
                                 $retail = $pricing->num( $original_gross );
-                                $pur    = $original_purchase > 0 ? $original_purchase : $retail; // fallback
-                                // При пересчёте закупку берём как retail*?? Нет: если нет покупной —
-                                // используем оригинальную расчётную (падение на retail).
-                                // minimal income из настроек.
-                                $r = $pricing->num( $original_purchase ) > 0
-                                        ? $pricing->calculate( $retail, $original_purchase, $original_disc_pct, $s['min_income'], $s['eur_rate'] )
-                                        : $pricing->calculate( $retail, $retail, $original_disc_pct, $s['min_income'], $s['eur_rate'] );
+                                // Закупку берём из meta. Если её нет (старый товар) — передаём 0,
+                                // BSI_Pricing::calculate() сам обработает этот случай:
+                                // floor_price = 0, base_price = retail_price (без подъёма).
+                                $r = $pricing->calculate(
+                                        $retail,
+                                        $original_purchase,
+                                        $original_disc_pct,
+                                        $s['min_income'],
+                                        $s['eur_rate']
+                                );
 
                                 $pricing->apply( $product, $r );
                         } else {

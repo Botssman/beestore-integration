@@ -91,27 +91,30 @@ class BSI_Settings {
         public function register_menu() {
                 // Главный пункт меню BeeStore виден всем менеджерам магазина.
                 $capability = 'manage_woocommerce';
-                // Но сама страница «Настройки» — только для администраторов.
-                $admin_capability = 'manage_options';
 
                 add_menu_page(
                         __( 'BeeStore Integration', 'beestore-integration' ),
                         __( 'BeeStore', 'beestore-integration' ),
                         $capability,
                         'beestore-integration',
-                        array( $this, 'render_settings_page' ),
+                        array( $this, 'render_redirect_page' ),
                         'dashicons-products',
                         58
                 );
 
-                add_submenu_page(
-                        'beestore-integration',
-                        __( 'Настройки', 'beestore-integration' ),
-                        __( 'Настройки', 'beestore-integration' ),
-                        $admin_capability,
-                        'beestore-integration',
-                        array( $this, 'render_settings_page' )
-                );
+                // ВАЖНО: страница «Настройки» НЕ регистрируется как отдельный пункт меню.
+                // Она доступна только внутри вкладки «⚠ Для разработчика» (bsi-dev-zone),
+                // через рендер BSI_Admin::render_dev_zone_page() → BSI_Settings::render_settings_page().
+                // Так обычные админы не видят Настройки без ввода пароля.
+        }
+
+        /**
+         * Страница-редирект: если пользователь зашёл в BeeStore без подпункта —
+         * перенаправляем на «Импорт каталога» (это основная страница).
+         */
+        public function render_redirect_page() {
+                wp_safe_redirect( admin_url( 'admin.php?page=bsi-import' ) );
+                exit;
         }
 
         public function register_settings() {

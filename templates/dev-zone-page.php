@@ -72,16 +72,16 @@ if ( ! isset( $session ) ) {
                 </div>
 
                 <div class="bsi-card" style="max-width:500px;">
-			<h3>Что в опасной зоне?</h3>
-			<ul style="list-style:disc;padding-left:20px;">
-				<li><strong style="color:#c62828;">Удаление ВСЕХ товаров и атрибутов BeeStore</strong> — полная очистка каталога</li>
-				<li><strong style="color:#d63638;">Удаление всех картинок BeeStore</strong> — полная очистка Media Library от картинок плагина</li>
-				<li><strong style="color:#d63636;">Удаление дублей картинок</strong> — оставляет по одной каждого изображения</li>
-				<li><strong style="color:#d63638;">Очистка диска от дублей файлов</strong> — удаление файлов с суффиксами -1, -2, -3</li>
-				<li><strong style="color:#d63628;">Удаление orphan миниатюр</strong> — миниатюры с незарегистрированными размерами</li>
-				<li><strong>Смена пароля</strong></li>
-			</ul>
-		</div>
+                        <h3>Что в опасной зоне?</h3>
+                        <ul style="list-style:disc;padding-left:20px;">
+                                <li><strong style="color:#c62828;">Удаление ВСЕХ товаров и атрибутов BeeStore</strong> — полная очистка каталога</li>
+                                <li><strong style="color:#d63638;">Удаление всех картинок BeeStore</strong> — полная очистка Media Library от картинок плагина</li>
+                                <li><strong style="color:#d63636;">Удаление дублей картинок</strong> — оставляет по одной каждого изображения</li>
+                                <li><strong style="color:#d63638;">Очистка диска от дублей файлов</strong> — удаление файлов с суффиксами -1, -2, -3</li>
+                                <li><strong style="color:#d63628;">Удаление orphan миниатюр</strong> — миниатюры с незарегистрированными размерами</li>
+                                <li><strong>Смена пароля</strong></li>
+                        </ul>
+                </div>
 
         <?php else : ?>
                 <!-- ═══ АВТОРИЗОВАН — показываем инструменты ═══ -->
@@ -104,6 +104,64 @@ if ( ! isset( $session ) ) {
                                 </button>
                         </form>
                 </div>
+
+                <!-- ═══ ВНУТРЕННИЕ ТАБЫ ═══ -->
+                <?php
+                $current_tab = isset( $_GET['devtab'] ) ? sanitize_key( $_GET['devtab'] ) : 'danger';
+                $base_url = admin_url( 'admin.php?page=bsi-dev-zone' );
+                ?>
+                <h2 class="nav-tab-wrapper" style="margin:15px 0 20px;">
+                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'settings', $base_url ) ); ?>" class="nav-tab <?php echo 'settings' === $current_tab ? 'nav-tab-active' : ''; ?>">
+                                <span class="dashicons dashicons-admin-settings" style="vertical-align:middle;margin-right:4px;"></span>
+                                <?php esc_html_e( 'Настройки', 'beestore-integration' ); ?>
+                        </a>
+                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'catalog', $base_url ) ); ?>" class="nav-tab <?php echo 'catalog' === $current_tab ? 'nav-tab-active' : ''; ?>">
+                                <span class="dashicons dashicons-category" style="vertical-align:middle;margin-right:4px;"></span>
+                                <?php esc_html_e( 'Каталог с FTP', 'beestore-integration' ); ?>
+                        </a>
+                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'logs', $base_url ) ); ?>" class="nav-tab <?php echo 'logs' === $current_tab ? 'nav-tab-active' : ''; ?>">
+                                <span class="dashicons dashicons-list-view" style="vertical-align:middle;margin-right:4px;"></span>
+                                <?php esc_html_e( 'Логи', 'beestore-integration' ); ?>
+                        </a>
+                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'diagnostics', $base_url ) ); ?>" class="nav-tab <?php echo 'diagnostics' === $current_tab ? 'nav-tab-active' : ''; ?>">
+                                <span class="dashicons dashicons-search" style="vertical-align:middle;margin-right:4px;"></span>
+                                <?php esc_html_e( 'Диагностика', 'beestore-integration' ); ?>
+                        </a>
+                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'danger', $base_url ) ); ?>" class="nav-tab <?php echo 'danger' === $current_tab ? 'nav-tab-active' : ''; ?>">
+                                <span class="dashicons dashicons-warning" style="vertical-align:middle;margin-right:4px;color:#d63638;"></span>
+                                <?php esc_html_e( '⚠ Опасные операции', 'beestore-integration' ); ?>
+                        </a>
+                </h2>
+
+                <?php
+                // Контент табов.
+                if ( 'settings' === $current_tab ) {
+                        // Рендерим страницу настроек.
+                        echo '<div class="bsi-card">';
+                        BSI_Settings::instance()->render_settings_page();
+                        echo '</div>';
+                } elseif ( 'catalog' === $current_tab ) {
+                        // Рендерим каталог с FTP.
+                        echo '<div class="bsi-card">';
+                        BSI_Admin::instance()->render_catalog_browser_page();
+                        echo '</div>';
+                } elseif ( 'logs' === $current_tab ) {
+                        // Рендерим логи.
+                        echo '<div class="bsi-card">';
+                        BSI_Admin::instance()->render_logs_page();
+                        echo '</div>';
+                } elseif ( 'diagnostics' === $current_tab ) {
+                        // Рендерим диагностику.
+                        echo '<div class="bsi-card">';
+                        BSI_Admin::instance()->render_diagnostics_page();
+                        echo '</div>';
+                } else {
+                        // 'danger' — опасные операции (по умолчанию).
+                        // Контент ниже — старые блоки опасных операций.
+                }
+                ?>
+
+                <?php if ( 'danger' === $current_tab ) : ?>
 
                 <!-- ═══ 1. УДАЛЕНИЕ ВСЕХ ТОВАРОВ И АТРИБУТОВ BEESTORE ═══ -->
                 <div class="bsi-card" style="border-left:4px solid #c62828;background:#fef7f7;">
@@ -292,7 +350,9 @@ if ( ! isset( $session ) ) {
                         </table>
                 </div>
 
-        <?php endif; ?>
+		<?php endif; // конец danger tab ?>
+
+	<?php endif; // конец session ?>
 </div>
 
 <!-- ═══ JavaScript (только если авторизован) ═══ -->

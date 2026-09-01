@@ -89,7 +89,10 @@ class BSI_Settings {
         }
 
         public function register_menu() {
+                // Главный пункт меню BeeStore виден всем менеджерам магазина.
                 $capability = 'manage_woocommerce';
+                // Но сама страница «Настройки» — только для администраторов.
+                $admin_capability = 'manage_options';
 
                 add_menu_page(
                         __( 'BeeStore Integration', 'beestore-integration' ),
@@ -105,7 +108,7 @@ class BSI_Settings {
                         'beestore-integration',
                         __( 'Настройки', 'beestore-integration' ),
                         __( 'Настройки', 'beestore-integration' ),
-                        $capability,
+                        $admin_capability,
                         'beestore-integration',
                         array( $this, 'render_settings_page' )
                 );

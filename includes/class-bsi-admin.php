@@ -26,7 +26,10 @@ class BSI_Admin {
         }
 
         public function register_submenus() {
+                // Основные разделы для всех менеджеров магазина.
                 $cap = 'manage_woocommerce';
+                // Разделы только для администраторов (управление настройками, FTP, логи, диагностика).
+                $admin_cap = 'manage_options';
 
                 add_submenu_page(
                         'beestore-integration',
@@ -48,15 +51,6 @@ class BSI_Admin {
 
                 add_submenu_page(
                         'beestore-integration',
-                        __( 'Каталог с FTP', 'beestore-integration' ),
-                        __( 'Каталог с FTP', 'beestore-integration' ),
-                        $cap,
-                        'bsi-catalog-browser',
-                        array( $this, 'render_catalog_browser_page' )
-                );
-
-                add_submenu_page(
-                        'beestore-integration',
                         __( 'Переводы', 'beestore-integration' ),
                         __( 'Переводы', 'beestore-integration' ),
                         $cap,
@@ -73,11 +67,27 @@ class BSI_Admin {
                         array( $this, 'render_filters_page' )
                 );
 
+                // ⚠ Разделы только для разработчика (администраторов).
+                // Настройки, Каталог с FTP, Логи, Диагностика — перенесены сюда.
+                // Обычные работники (manage_woocommerce) их не видят.
+                //
+                // Примечание: «Настройки» регистрируется самим классом BSI_Settings
+                // (register_menu), но с capability manage_options.
+
+                add_submenu_page(
+                        'beestore-integration',
+                        __( 'Каталог с FTP', 'beestore-integration' ),
+                        __( 'Каталог с FTP', 'beestore-integration' ),
+                        $admin_cap,
+                        'bsi-catalog-browser',
+                        array( $this, 'render_catalog_browser_page' )
+                );
+
                 add_submenu_page(
                         'beestore-integration',
                         __( 'Логи', 'beestore-integration' ),
                         __( 'Логи', 'beestore-integration' ),
-                        $cap,
+                        $admin_cap,
                         'bsi-logs',
                         array( $this, 'render_logs_page' )
                 );
@@ -86,7 +96,7 @@ class BSI_Admin {
                         'beestore-integration',
                         __( 'Диагностика', 'beestore-integration' ),
                         __( 'Диагностика', 'beestore-integration' ),
-                        $cap,
+                        $admin_cap,
                         'bsi-diagnostics',
                         array( $this, 'render_diagnostics_page' )
                 );
@@ -99,7 +109,7 @@ class BSI_Admin {
                         'beestore-integration',
                         __( '⚠ Для разработчика', 'beestore-integration' ),
                         __( '⚠ Для разработчика', 'beestore-integration' ),
-                        'manage_options',
+                        $admin_cap,
                         'bsi-dev-zone',
                         array( $this, 'render_dev_zone_page' )
                 );

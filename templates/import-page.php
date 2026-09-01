@@ -315,32 +315,6 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                 </div>
         </div>
 
-        <!-- Все опасные инструменты перенесены в "Для разработчика" -->
-        <div class="bsi-card" style="border-color:#f57c00;background:#fffaf3;">
-                <h2 style="color:#f57c00;">
-                        <span class="dashicons dashicons-shield"></span>
-                        <?php esc_html_e( '⚠ Опасные инструменты → перенесены в «Для разработчика»', 'beestore-integration' ); ?>
-                </h2>
-                <p>
-                        <?php esc_html_e( 'Все опасные операции (удаление товаров, атрибутов, картинок, очистка диска) перенесены в отдельную вкладку с парольной защитой.', 'beestore-integration' ); ?>
-                </p>
-                <ul style="list-style:disc;padding-left:20px;color:#666;">
-                        <li><?php esc_html_e( 'Удалить все товары и атрибуты BeeStore', 'beestore-integration' ); ?></li>
-                        <li><?php esc_html_e( 'Удалить все картинки BeeStore', 'beestore-integration' ); ?></li>
-                        <li><?php esc_html_e( 'Удалить только дубликаты картинок', 'beestore-integration' ); ?></li>
-                        <li><?php esc_html_e( 'Очистка диска: дубликаты файлов (-1, -2, -3)', 'beestore-integration' ); ?></li>
-                        <li><?php esc_html_e( 'Удаление orphan миниатюр WordPress', 'beestore-integration' ); ?></li>
-                </ul>
-                <p>
-                        <a href="<?php echo esc_url( admin_url( 'admin.php?page=bsi-dev-zone' ) ); ?>" class="button button-primary">
-                                <span class="dashicons dashicons-shield"></span>
-                                <?php esc_html_e( 'Перейти в «⚠ Для разработчика»', 'beestore-integration' ); ?>
-                        </a>
-                </p>
-                <p style="margin-bottom:0;color:#666;font-size:12px;">
-                        <?php esc_html_e( 'Доступ: только администраторы + дополнительный пароль. Пароль по умолчанию: beestore-dev (смените после первого входа).', 'beestore-integration' ); ?>
-                </p>
-        </div>
 
         <!-- Последний импорт -->
         <div class="bsi-card">

@@ -110,24 +110,38 @@ if ( ! isset( $session ) ) {
                 $current_tab = isset( $_GET['devtab'] ) ? sanitize_key( $_GET['devtab'] ) : 'danger';
                 $base_url = admin_url( 'admin.php?page=bsi-dev-zone' );
                 ?>
-                <h2 class="nav-tab-wrapper" style="margin:15px 0 20px;">
-                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'settings', $base_url ) ); ?>" class="nav-tab <?php echo 'settings' === $current_tab ? 'nav-tab-active' : ''; ?>">
+                <script>
+			jQuery(function($){
+				// Изоляция: наши табы (.bsi-devtab) ссылаются на реальные URL.
+				// settings-page.js перехватывает .nav-tab click и preventDefault + .bsi-tab.hide().
+				// Мы снимаем обработчик с .bsi-devtab и разрешаем обычный переход.
+				$(document).off('click', '.bsi-devtab').on('click', '.bsi-devtab', function(e){
+					// Дополнительно показываем .bsi-tab (на случай если settings-page их скрыл).
+					$('.bsi-tab').show();
+					return true; // разрешаем переход
+				});
+				// Если мы на табе настроек — показываем все .bsi-tab (FTP/SOAP/etc).
+				$('.bsi-tab').show();
+			});
+			</script>
+			<h2 class="nav-tab-wrapper bsi-dev-tabs" style="margin:15px 0 20px;">
+                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'settings', $base_url ) ); ?>" class="nav-tab bsi-devtab <?php echo 'settings' === $current_tab ? 'nav-tab-active' : ''; ?>">
                                 <span class="dashicons dashicons-admin-settings" style="vertical-align:middle;margin-right:4px;"></span>
                                 <?php esc_html_e( 'Настройки', 'beestore-integration' ); ?>
                         </a>
-                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'catalog', $base_url ) ); ?>" class="nav-tab <?php echo 'catalog' === $current_tab ? 'nav-tab-active' : ''; ?>">
+                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'catalog', $base_url ) ); ?>" class="nav-tab bsi-devtab <?php echo 'catalog' === $current_tab ? 'nav-tab-active' : ''; ?>">
                                 <span class="dashicons dashicons-category" style="vertical-align:middle;margin-right:4px;"></span>
                                 <?php esc_html_e( 'Каталог с FTP', 'beestore-integration' ); ?>
                         </a>
-                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'logs', $base_url ) ); ?>" class="nav-tab <?php echo 'logs' === $current_tab ? 'nav-tab-active' : ''; ?>">
+                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'logs', $base_url ) ); ?>" class="nav-tab bsi-devtab <?php echo 'logs' === $current_tab ? 'nav-tab-active' : ''; ?>">
                                 <span class="dashicons dashicons-list-view" style="vertical-align:middle;margin-right:4px;"></span>
                                 <?php esc_html_e( 'Логи', 'beestore-integration' ); ?>
                         </a>
-                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'diagnostics', $base_url ) ); ?>" class="nav-tab <?php echo 'diagnostics' === $current_tab ? 'nav-tab-active' : ''; ?>">
+                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'diagnostics', $base_url ) ); ?>" class="nav-tab bsi-devtab <?php echo 'diagnostics' === $current_tab ? 'nav-tab-active' : ''; ?>">
                                 <span class="dashicons dashicons-search" style="vertical-align:middle;margin-right:4px;"></span>
                                 <?php esc_html_e( 'Диагностика', 'beestore-integration' ); ?>
                         </a>
-                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'danger', $base_url ) ); ?>" class="nav-tab <?php echo 'danger' === $current_tab ? 'nav-tab-active' : ''; ?>">
+                        <a href="<?php echo esc_url( add_query_arg( 'devtab', 'danger', $base_url ) ); ?>" class="nav-tab bsi-devtab <?php echo 'danger' === $current_tab ? 'nav-tab-active' : ''; ?>">
                                 <span class="dashicons dashicons-warning" style="vertical-align:middle;margin-right:4px;color:#d63638;"></span>
                                 <?php esc_html_e( '⚠ Опасные операции', 'beestore-integration' ); ?>
                         </a>

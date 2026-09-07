@@ -112,19 +112,36 @@ if ( ! isset( $session ) ) {
                 ?>
                 <script>
 			jQuery(function($){
-				// Изоляция: наши табы (.bsi-devtab) ссылаются на реальные URL.
-				// settings-page.js перехватывает .nav-tab click и preventDefault + .bsi-tab.hide().
-				// Мы снимаем обработчик с .bsi-devtab и разрешаем обычный переход.
-				$(document).off('click', '.bsi-devtab').on('click', '.bsi-devtab', function(e){
-					// Дополнительно показываем .bsi-tab (на случай если settings-page их скрыл).
-					$('.bsi-tab').show();
-					return true; // разрешаем переход
-				});
-				// Если мы на табе настроек — показываем все .bsi-tab (FTP/SOAP/etc).
+				// Показываем все .bsi-tab (на случай если settings-page JS скрыл их).
 				$('.bsi-tab').show();
 			});
 			</script>
-			<h2 class="nav-tab-wrapper bsi-dev-tabs" style="margin:15px 0 20px;">
+			
+		<style>
+			.bsi-dev-tabs-wrapper { display:flex; gap:2px; flex-wrap:wrap; }
+			.bsi-devtab {
+				display:inline-block;
+				padding:8px 14px;
+				margin:0 1px -1px 0;
+				background:#f0f0f1;
+				border:1px solid #c3c4c7;
+				border-bottom:none;
+				border-radius:4px 4px 0 0;
+				text-decoration:none;
+				color:#50575e;
+				font-weight:500;
+				font-size:13px;
+				line-height:1.5;
+			}
+			.bsi-devtab:hover { background:#e5e5e7; color:#1d2327; }
+			.bsi-devtab-active {
+				background:#fff;
+				border-bottom:1px solid #fff;
+				color:#1d2327;
+				font-weight:600;
+			}
+		</style>
+		<h2 class="bsi-dev-tabs-wrapper" style="margin:15px 0 20px;border-bottom:1px solid #c3c4c7;">
                         <a href="<?php echo esc_url( add_query_arg( 'devtab', 'settings', $base_url ) ); ?>" class="nav-tab bsi-devtab <?php echo 'settings' === $current_tab ? 'nav-tab-active' : ''; ?>">
                                 <span class="dashicons dashicons-admin-settings" style="vertical-align:middle;margin-right:4px;"></span>
                                 <?php esc_html_e( 'Настройки', 'beestore-integration' ); ?>

@@ -52,6 +52,7 @@ class BSI_Import_Filters {
                         'mode'       => isset( $settings['import_filter_mode'] ) ? $settings['import_filter_mode'] : 'all',
                         'categories' => isset( $settings['import_filter_categories'] ) && is_array( $settings['import_filter_categories'] ) ? $settings['import_filter_categories'] : array(),
                         'brands'     => isset( $settings['import_filter_brands'] ) && is_array( $settings['import_filter_brands'] ) ? $settings['import_filter_brands'] : array(),
+                        'genders'    => isset( $settings['import_filter_genders'] ) && is_array( $settings['import_filter_genders'] ) ? $settings['import_filter_genders'] : array(),
                 );
         }
 
@@ -60,9 +61,10 @@ class BSI_Import_Filters {
          *
          * @param string $category Имя категории (например 'CLOTHING').
          * @param string $brand    Имя бренда (например 'VERSACE').
+         * @param string $gender   Пол (например 'WOMAN'). Опционально.
          * @return bool true — товар проходит фильтр, false — пропустить.
          */
-        public function should_import( $category, $brand ) {
+        public function should_import( $category, $brand, $gender = '' ) {
                 $filters = $this->get_settings();
 
                 // Режим 'all' — импортировать всё.
@@ -72,11 +74,12 @@ class BSI_Import_Filters {
 
                 // Режим 'whitelist' — товар должен быть И в выбранной категории И в выбранном бренде.
                 if ( 'whitelist' === $filters['mode'] ) {
-                        $cat_selected = ! empty( $filters['categories'] );
+                        $cat_selected   = ! empty( $filters['categories'] );
                         $brand_selected = ! empty( $filters['brands'] );
+                        $gender_selected = ! empty( $filters['genders'] );
 
                         // Если ничего не выбрано — импортировать всё (как 'all').
-                        if ( ! $cat_selected && ! $brand_selected ) {
+                        if ( ! $cat_selected && ! $brand_selected && ! $gender_selected ) {
                                 return true;
                         }
 
@@ -91,6 +94,13 @@ class BSI_Import_Filters {
                         if ( $brand_selected ) {
                                 if ( ! isset( $filters['brands'][ $brand ] ) ) {
                                         return false; // Бренд не выбран.
+                                }
+                        }
+
+                        // Проверяем пол.
+                        if ( $gender_selected ) {
+                                if ( ! isset( $filters['genders'][ $gender ] ) ) {
+                                        return false; // Пол не выбран.
                                 }
                         }
 
@@ -126,6 +136,10 @@ class BSI_Import_Filters {
                         if ( isset( $filters['brands'][ $brand ] ) ) {
                                 return false;
                         }
+                        // Если пол в чёрном списке — пропустить.
+                        if ( $gender && isset( $filters['genders'][ $gender ] ) ) {
+                                return false;
+                        }
                         return true;
                 }
 
@@ -137,8 +151,9 @@ class BSI_Import_Filters {
          *
          * @param string $category
          * @param string $brand
+         * @param string $gender Опционально.
          */
-        public function increment_counters( $category, $brand ) {
+        public function increment_counters( $category, $brand, $gender = '' ) {
                 $counters = $this->get_counters();
 
                 if ( ! isset( $counters['categories'][ $category ] ) ) {
@@ -150,6 +165,13 @@ class BSI_Import_Filters {
                         $counters['brands'][ $brand ] = 0;
                 }
                 $counters['brands'][ $brand ]++;
+
+                if ( $gender ) {
+                        if ( ! isset( $counters['genders'][ $gender ] ) ) {
+                                $counters['genders'][ $gender ] = 0;
+                        }
+                        $counters['genders'][ $gender ]++;
+                }
 
                 $this->save_counters( $counters );
         }
@@ -166,6 +188,7 @@ class BSI_Import_Filters {
                                 $this->counters = array(
                                         'categories' => array(),
                                         'brands'     => array(),
+                                        'genders'    => array(),
                                 );
                         }
                         if ( ! isset( $this->counters['categories'] ) ) {
@@ -173,6 +196,9 @@ class BSI_Import_Filters {
                         }
                         if ( ! isset( $this->counters['brands'] ) ) {
                                 $this->counters['brands'] = array();
+                        }
+                        if ( ! isset( $this->counters['genders'] ) ) {
+                                $this->counters['genders'] = array();
                         }
                 }
                 return $this->counters;
@@ -195,6 +221,7 @@ class BSI_Import_Filters {
                 $this->counters = array(
                         'categories' => array(),
                         'brands'     => array(),
+                        'genders'    => array(),
                 );
                 delete_option( 'bsi_import_counters' );
         }
@@ -214,6 +241,7 @@ class BSI_Import_Filters {
                         'macro'     => array(),
                         'sub'       => array(),
                         'brands'    => array(),
+                        'genders'   => array(),
                         'scanning'  => true,
                 );
                 update_option( 'bsi_scan_state', $state, false );
@@ -261,6 +289,7 @@ class BSI_Import_Filters {
                 $macro  = isset( $state['macro'] ) ? $state['macro'] : array();
                 $sub    = isset( $state['sub'] ) ? $state['sub'] : array();
                 $brands = isset( $state['brands'] ) ? $state['brands'] : array();
+                $genders = isset( $state['genders'] ) ? $state['genders'] : array();
 
                 while ( ! feof( $handle ) && $count < $batch ) {
                         $line = fgets( $handle, 1048576 );
@@ -325,6 +354,20 @@ class BSI_Import_Filters {
                                 }
                                 $brands[ $brand ]++;
                         }
+
+                        // Пол (Sesso / DSSesso).
+                        $gender = '';
+                        if ( ! empty( $row_data['DSSessoWeb'] ) ) {
+                                $gender = $row_data['DSSessoWeb'];
+                        } elseif ( ! empty( $row_data['DSSesso'] ) ) {
+                                $gender = $row_data['DSSesso'];
+                        }
+                        if ( $gender ) {
+                                if ( ! isset( $genders[ $gender ] ) ) {
+                                        $genders[ $gender ] = 0;
+                                }
+                                $genders[ $gender ]++;
+                        }
                 }
 
                 // Сохраняем позицию файла (fgets не буферизует — ftell точный).
@@ -338,6 +381,7 @@ class BSI_Import_Filters {
                 $state['macro']     = $macro;
                 $state['sub']       = $sub;
                 $state['brands']    = $brands;
+                $state['genders']   = $genders;
 
                 $done = $at_eof || ( 0 === $count );
                 $state['scanning'] = ! $done;
@@ -351,6 +395,7 @@ class BSI_Import_Filters {
                         'macro'     => count( $macro ),
                         'sub'       => count( $sub ),
                         'brands'    => count( $brands ),
+                        'genders'   => count( $genders ),
                 );
         }
 

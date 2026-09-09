@@ -356,11 +356,31 @@ class BSI_Translations {
 
                 $result = array();
                 foreach ( $terms as $term ) {
-                        $result[ $term->name ] = array(
-                                'term_id'    => $term->term_id,
-                                'slug'       => $term->slug,
-                                'count'      => $term->count,
-                                'current_name' => $term->name,
+                        // Получаем оригинальное имя из meta (если есть).
+                        $original_name = get_term_meta( $term->term_id, '_bsi_original_name', true );
+
+                        // Если meta нет — reverse lookup по сохранённым переводам.
+                        if ( empty( $original_name ) ) {
+                                $saved = $this->get_translations( $taxonomy );
+                                foreach ( $saved as $orig => $ru ) {
+                                        if ( 0 === strcasecmp( $ru, $term->name ) ) {
+                                                $original_name = $orig;
+                                                break;
+                                        }
+                                }
+                        }
+
+                        // Если и так не нашли — оригинал = текущее имя.
+                        if ( empty( $original_name ) ) {
+                                $original_name = $term->name;
+                        }
+
+                        $result[ $original_name ] = array(
+                                'term_id'       => $term->term_id,
+                                'slug'          => $term->slug,
+                                'count'         => $term->count,
+                                'current_name'  => $term->name,
+                                'original_name' => $original_name,
                         );
                 }
                 return $result;

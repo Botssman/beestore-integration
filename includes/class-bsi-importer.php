@@ -628,7 +628,8 @@ class BSI_Importer {
                                 } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
                                         $brand = $row['RaggruppamentoLinea'];
                                 }
-                                if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand ) ) {
+                                $gender = $this->extract_gender( $row );
+                                if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand, $gender ) ) {
                                         $skipped_by_filter++;
                                         continue;
                                 }
@@ -642,7 +643,7 @@ class BSI_Importer {
                                         // картинок В CSV (нет ни одного URLImg → черновик).
                                         $this->sync_visibility_by_images( $existing_id, $data['variants'] );
                                         $batch_skipped++;
-                                        BSI_Import_Filters::instance()->increment_counters( $category, $brand );
+                                        BSI_Import_Filters::instance()->increment_counters( $category, $brand, $gender );
                                         continue;
                                 }
 
@@ -655,7 +656,7 @@ class BSI_Importer {
                                 }
 
                                 $this->upsert_model( $igu, $data['parent'], $data['variants'], $is_multi_variant );
-                                BSI_Import_Filters::instance()->increment_counters( $category, $brand );
+                                BSI_Import_Filters::instance()->increment_counters( $category, $brand, $gender );
                                 if ( $existing_id ) {
                                         $batch_updated++;
                                         $item_name = ( ! empty( $data['parent']['DSArticoloAgg'] ) ) ? $data['parent']['DSArticoloAgg'] : ( ! empty( $data['parent']['DSArticolo'] ) ? $data['parent']['DSArticolo'] : $igu );
@@ -1760,9 +1761,10 @@ class BSI_Importer {
                         } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
                                 $brand = $row['RaggruppamentoLinea'];
                         }
+                        $gender = $this->extract_gender( $row );
 
                         // Проверяем фильтром — если не проходит, пропускаем строку.
-                        if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand ) ) {
+                        if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand, $gender ) ) {
                                 $skipped_by_filter++;
                                 continue;
                         }
@@ -1827,6 +1829,9 @@ class BSI_Importer {
                 delete_transient( 'bsi_import_lock' );
                 delete_transient( 'bsi_import_lock_pid' );
 
+                // Хук: после импорта — применить тег новинок (и другие пост-обработки).
+                do_action( 'bsi_after_import', array(), $report );
+
                 return $report;
         }
 
@@ -1848,7 +1853,8 @@ class BSI_Importer {
                                 if ( $existing_id && $this->product_unchanged( $existing_id, $data['variants'] ) ) {
                                         BSI_Import_Filters::instance()->increment_counters(
                                                 $this->extract_category( $data['parent'] ),
-                                                $this->extract_brand( $data['parent'] )
+                                                $this->extract_brand( $data['parent'] ),
+                                                $this->extract_gender( $data['parent'] )
                                         );
                                         continue;
                                 }
@@ -1859,6 +1865,11 @@ class BSI_Importer {
                                         'igu'  => $igu_articolo,
                                         'name' => ( ! empty( $data['parent']['DSArticoloAgg'] ) ) ? $data['parent']['DSArticoloAgg'] : $igu_articolo,
                                 ) );
+                                BSI_Import_Filters::instance()->increment_counters(
+                                        $this->extract_category( $data['parent'] ),
+                                        $this->extract_brand( $data['parent'] ),
+                                        $this->extract_gender( $data['parent'] )
+                                );
                         } catch ( Exception $e ) {
                                 $this->log( 'error', 'Ошибка импорта модели', array(
                                         'igu' => $igu_articolo,
@@ -1893,7 +1904,7 @@ class BSI_Importer {
                         $product_id = $this->upsert_simple_product( $igu_articolo, $parent_row, $variant_rows[0] );
                 }
 
-                // Сохраняем карту хешей вариаций (SKU → хеш) для быстрого определения
+        // Сохраняем карту хешей вариаций (SKU → хеш) для быстрого определения
                 // изменений при повторном импорте.
                 //
                 // ВАЖНО: мержим (добавляем/обновляем) в существующую карту вместо
@@ -1912,6 +1923,11 @@ class BSI_Importer {
                                 $map[ $sku ] = $this->compute_variant_hash( $row );
                         }
                         update_post_meta( $product_id, '_bsi_data_hash', $map );
+
+                        // Сохраняем сезон в meta — для тега новинок.
+                        if ( class_exists( 'BSI_Novelties' ) ) {
+                                BSI_Novelties::instance()->save_product_season( $product_id, $parent_row );
+                        }
                 }
 
                 return $product_id;
@@ -2061,6 +2077,23 @@ class BSI_Importer {
                         $brand = $row['RaggruppamentoLinea'];
                 }
                 return $brand;
+        }
+
+        /**
+         * Извлечь пол из строки CSV.
+         * Единая логика: DSSessoWeb → DSSesso.
+         *
+         * @param array $row Строка CSV.
+         * @return string
+         */
+        private function extract_gender( $row ) {
+                $gender = '';
+                if ( ! empty( $row['DSSessoWeb'] ) ) {
+                        $gender = $row['DSSessoWeb'];
+                } elseif ( ! empty( $row['DSSesso'] ) ) {
+                        $gender = $row['DSSesso'];
+                }
+                return $gender;
         }
 
         /**
@@ -3198,20 +3231,44 @@ class BSI_Importer {
         private function ensure_term( $name, $taxonomy, $parent_name = '' ) {
                 $parent = 0;
                 if ( $parent_name ) {
+                        // Сначала ищем по оригинальному имени.
                         $parent_term = term_exists( $parent_name, $taxonomy );
+                        // Если не найден — ищем по переводу (терм мог быть переименован).
+                        if ( ! is_array( $parent_term ) ) {
+                                $parent_translated = BSI_Translations::instance()->get_translation( $taxonomy, $parent_name );
+                                if ( $parent_translated ) {
+                                        $parent_term = term_exists( $parent_translated, $taxonomy );
+                                }
+                        }
                         if ( is_array( $parent_term ) ) {
                                 $parent = (int) $parent_term['term_id'];
                         }
                 }
 
+                // 1. Сначала ищем по оригинальному имени.
                 $existing = term_exists( $name, $taxonomy, $parent );
                 if ( is_array( $existing ) ) {
                         return (int) $existing['term_id'];
                 }
 
+                // 2. Ищем по переводу (терм мог быть переименован в русский).
+                // Это предотвращает создание дублей с slug "-2".
+                $translated = BSI_Translations::instance()->get_translation( $taxonomy, $name );
+                if ( $translated ) {
+                        $existing = term_exists( $translated, $taxonomy, $parent );
+                        if ( is_array( $existing ) ) {
+                                // Терм уже существует (был переименован) — возвращаем его.
+                                return (int) $existing['term_id'];
+                        }
+                }
+
+                // 3. Создаём новый терм.
                 $result = wp_insert_term( $name, $taxonomy, array( 'parent' => $parent ) );
                 if ( ! is_wp_error( $result ) ) {
-                        return (int) $result['term_id'];
+                        $term_id = (int) $result['term_id'];
+                        // Сохраняем оригинальное имя в meta — нужно для страницы Переводов.
+                        update_term_meta( $term_id, '_bsi_original_name', $name );
+                        return $term_id;
                 }
                 return 0;
         }

@@ -12,6 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 $mode          = $filters['mode'];
 $filter_cats   = $filters['categories'];
 $filter_brands = $filters['brands'];
+$filter_genders = isset( $filters['genders'] ) ? $filters['genders'] : array();
 
 $webp_enabled  = isset( $settings['webp_enabled'] ) && '1' === $settings['webp_enabled'] ? true : false;
 $webp_strategy = isset( $settings['webp_strategy'] ) ? $settings['webp_strategy'] : 3;
@@ -21,10 +22,12 @@ $webp_supports = BSI_WebP::instance()->server_supports();
 $scan_macro  = isset( $scan['macro'] ) ? $scan['macro'] : array();
 $scan_sub    = isset( $scan['sub'] ) ? $scan['sub'] : array();
 $scan_brands = isset( $scan['brands'] ) ? $scan['brands'] : array();
+$scan_genders = isset( $scan['genders'] ) ? $scan['genders'] : array();
 ksort( $scan_macro );
 ksort( $scan_sub );
 ksort( $scan_brands );
-$has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands );
+ksort( $scan_genders );
+$has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_genders );
 ?>
 
 <div class="wrap">
@@ -184,7 +187,38 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands );
                         </div>
                         <?php endif; ?>
 
-                <?php submit_button( __( 'Сохранить фильтры', 'beestore-integration' ) ); ?>
+                
+			<!-- Пол -->
+			<?php if ( ! empty( $scan_genders ) ) : ?>
+			<div class="bsi-card">
+				<h2><?php esc_html_e( 'Пол', 'beestore-integration' ); ?> (<?php echo esc_html( count( $scan_genders ) ); ?>)</h2>
+				<p style="margin-bottom:10px;">
+					<button type="button" class="button button-small bsi-select-all" data-target="bsi-gender-table"><?php esc_html_e( 'Выбрать все', 'beestore-integration' ); ?></button>
+					<button type="button" class="button button-small bsi-deselect-all" data-target="bsi-gender-table"><?php esc_html_e( 'Снять выделение', 'beestore-integration' ); ?></button>
+				</p>
+				<table class="widefat striped" id="bsi-gender-table">
+					<thead>
+						<tr>
+							<th style="width:30px;">✓</th>
+							<th><?php esc_html_e( 'Пол', 'beestore-integration' ); ?></th>
+							<th style="width:100px;"><?php esc_html_e( 'Строк', 'beestore-integration' ); ?></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( $scan_genders as $name => $count ) : ?>
+							<?php $is_selected = isset( $filter_genders[ $name ] ); ?>
+							<tr>
+								<td><input type="checkbox" name="bsi_settings[filter_gender_check][<?php echo esc_attr( $name ); ?>]" value="1" <?php checked( $is_selected ); ?>></td>
+								<td><strong><?php echo esc_html( $name ); ?></strong></td>
+								<td><code><?php echo esc_html( $count ); ?></code></td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			</div>
+			<?php endif; ?>
+
+			<?php submit_button( __( 'Сохранить фильтры', 'beestore-integration' ) ); ?>
         </form>
         <?php else : ?>
                 <div class="bsi-card">

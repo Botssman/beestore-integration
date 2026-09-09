@@ -59,28 +59,35 @@ $supported_taxonomies = BSI_Translations::SUPPORTED_TAXONOMIES;
 					</tr>
 				</thead>
 				<tbody>
-					<?php foreach ( $existing_terms as $term_name => $info ) : ?>
+					<?php foreach ( $existing_terms as $original_name => $info ) : ?>
 						<?php
-						// Если терм уже переименован (его имя = переводу), показываем перевод в правой колонке.
-						// Иначе ищем перевод по оригинальному имени (которое могло быть до переименования).
-						$saved_ru = '';
-						foreach ( $saved_translations as $orig => $ru ) {
-							if ( 0 === strcasecmp( $orig, $term_name ) || 0 === strcasecmp( $orig, $info['slug'] ) ) {
-								$saved_ru = $ru;
-								break;
-							}
+						// Оригинал — из BeeStore (английский).
+						// Перевод — текущее имя терма (если оно отличается от оригинала — уже переведено).
+						$current_name = $info['current_name'];
+						$is_translated = ( 0 !== strcasecmp( $original_name, $current_name ) );
+
+						// Значение для поля ввода перевода:
+						// Если уже переведено — показываем текущий перевод (current_name).
+						// Если нет — показываем сохранённый перевод из БД (если есть).
+						$translation_value = $is_translated ? $current_name : '';
+						if ( empty( $translation_value ) ) {
+							$saved = BSI_Translations::instance()->get_translation( $current_tax, $original_name );
+							$translation_value = $saved ?: '';
 						}
 						?>
 						<tr>
 							<td>
-								<strong><?php echo esc_html( $term_name ); ?></strong>
+								<strong><?php echo esc_html( $original_name ); ?></strong>
+								<?php if ( $is_translated ) : ?>
+									<br><small style="color:#2e7d32;">✓ <?php esc_html_e( 'переведено', 'beestore-integration' ); ?></small>
+								<?php endif; ?>
 								<br><small style="color:#999;">slug: <?php echo esc_html( $info['slug'] ); ?></small>
 							</td>
 							<td>
 								<input type="text"
 									class="bsi-translation-input regular-text"
-									data-original="<?php echo esc_attr( $term_name ); ?>"
-									value="<?php echo esc_attr( $saved_ru ); ?>"
+									data-original="<?php echo esc_attr( $original_name ); ?>"
+									value="<?php echo esc_attr( $translation_value ); ?>"
 									placeholder="<?php esc_attr_e( 'введите перевод...', 'beestore-integration' ); ?>">
 							</td>
 							<td><code><?php echo esc_html( $info['count'] ); ?></code></td>

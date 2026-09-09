@@ -168,6 +168,16 @@ class BSI_Settings {
                                 $output['import_filter_brands'][ $brand_name ] = $limit;
                         }
 
+                        // Пол (genders) — просто список выбранных (без лимитов).
+                        $output['import_filter_genders'] = array();
+                        $gender_checks = isset( $input['filter_gender_check'] ) && is_array( $input['filter_gender_check'] ) ? $input['filter_gender_check'] : array();
+                        foreach ( $gender_checks as $gender_name => $checked ) {
+                                $gender_name = sanitize_text_field( $gender_name );
+                                if ( $gender_name ) {
+                                        $output['import_filter_genders'][ $gender_name ] = 1;
+                                }
+                        }
+
                         return $output;
                 }
 

@@ -284,6 +284,23 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                         </td>
                                 </tr>
                                 <tr>
+                                        <th><label for="novelties_season">Сезон новинок</label></th>
+                                        <td>
+                                                <input type="text" name="bsi_settings[novelties_season]" id="novelties_season" value="<?php echo esc_attr( isset( $settings['novelties_season'] ) ? $settings['novelties_season'] : '' ); ?>" class="regular-text" placeholder="26W">
+                                                <p class="description">
+                                                        Текущий сезон BeeStore (например 26W, 27S). Товары этого сезона помечаются тегом «Новинки» (slug = novinki). При смене сезона — старые товары теряют тег, новые получают.
+                                                </p>
+                                                <p>
+                                                        <button type="button" class="button button-secondary" id="bsi-apply-novelties-btn">
+                                                                <span class="dashicons dashicons-tag"></span>
+                                                                Применить тег новинок сейчас
+                                                        </button>
+                                                        <span id="bsi-novelties-status" style="margin-left:10px;"></span>
+                                                </p>
+                                        </td>
+                                </tr>
+
+                                <tr>
                                         <th><label for="import_batch_size"><?php esc_html_e( 'Размер пакета импорта', 'beestore-integration' ); ?></label></th>
                                         <td>
                                                 <input type="number" name="bsi_settings[import_batch_size]" id="import_batch_size" value="<?php echo esc_attr( $import_batch_size ); ?>" class="small-text" min="10" max="2000" step="10">
@@ -457,6 +474,29 @@ jQuery(document).ready(function($){
                 $(this).addClass('nav-tab-active');
                 $('.bsi-tab').hide();
                 $('#bsi-' + tab).show();
+        });
+
+        // ─── Кнопка «Применить тег новинок» ──────────────────────────
+        $('#bsi-apply-novelties-btn').on('click', function() {
+                var $btn = $(this);
+                var $status = $('#bsi-novelties-status');
+                $btn.prop('disabled', true);
+                $status.html('<span class="spinner is-active" style="float:none;vertical-align:middle;"></span> Применяем...');
+
+                $.post(bsiAdmin.ajaxUrl, {
+                        action: 'bsi_apply_novelties',
+                        nonce: bsiAdmin.nonce
+                }, function(response) {
+                        $btn.prop('disabled', false);
+                        if (response.success) {
+                                $status.html('<span style="color:#2e7d32;">✓ ' + response.data.message + '</span>');
+                        } else {
+                                $status.html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
+                        }
+                }).fail(function() {
+                        $btn.prop('disabled', false);
+                        $status.html('<span style="color:#c62828;">✗ AJAX error</span>');
+                });
         });
 });
 </script>

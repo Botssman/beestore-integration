@@ -370,20 +370,41 @@ class BSI_Translations {
                                 }
                         }
 
-			// Если и так не нашли — reverse lookup по встроенному словарю.
-			// Это для термов, переименованных ДО v1.9.46 (meta не сохранена).
-			if ( empty( $original_name ) ) {
-				$default_dict = $this->get_default_dict( $taxonomy );
-				if ( $default_dict ) {
-					foreach ( $default_dict as $orig => $ru ) {
-						if ( 0 === strcasecmp( $ru, $term->name ) ) {
-							$original_name = $orig;
-							update_term_meta( $term->term_id, '_bsi_original_name', $orig );
-							break;
-						}
-					}
-				}
-			}
+                        // Если и так не нашли — reverse lookup по встроенному словарю.
+                        // Это для термов, переименованных ДО v1.9.46 (meta не сохранена).
+                        if ( empty( $original_name ) ) {
+                                $default_dict = $this->get_default_dict( $taxonomy );
+                                if ( $default_dict ) {
+                                        foreach ( $default_dict as $orig => $ru ) {
+                                                if ( 0 === strcasecmp( $ru, $term->name ) ) {
+                                                        $original_name = $orig;
+                                                        update_term_meta( $term->term_id, '_bsi_original_name', $orig );
+                                                        break;
+                                                }
+                                        }
+                                        // Если не нашли по имени — ищем по slug.
+                                        // slug 'ballerinas' → ключ словаря 'BALLERINAS'.
+                                        if ( empty( $original_name ) && ! empty( $term->slug ) ) {
+                                                foreach ( $default_dict as $orig => $ru ) {
+                                                        if ( 0 === strcasecmp( str_replace( array( '-', ' ' ), '_', $orig ), str_replace( array( '-', ' ' ), '_', $term->slug ) ) ) {
+                                                                $original_name = $orig;
+                                                                update_term_meta( $term->term_id, '_bsi_original_name', $orig );
+                                                                break;
+                                                        }
+                                                }
+                                        }
+                                }
+                        }
+
+                        // Если всё ещё не нашли — пробуем по slug без словаря.
+                        // slug обычно = оригинал в нижнем регистре с заменой пробелов на дефисы.
+                        if ( empty( $original_name ) && ! empty( $term->slug ) ) {
+                                // Если slug не содержит русских букв — это английский оригинал.
+                                if ( ! preg_match( '/[а-яё]/i', $term->slug ) ) {
+                                        $original_name = strtoupper( str_replace( '-', ' ', $term->slug ) );
+                                        update_term_meta( $term->term_id, '_bsi_original_name', $original_name );
+                                }
+                        }
 
                         // Если и так не нашли — оригинал = текущее имя.
                         if ( empty( $original_name ) ) {
@@ -400,21 +421,21 @@ class BSI_Translations {
                 }
                 return $result;
         }
-	/**
-	 * Получить встроенный словарь переводов для таксономии.
-	 * Используется для reverse lookup: по русскому имени найти английский оригинал.
-	 *
-	 * @param string $taxonomy
-	 * @return array|false
-	 */
-	public function get_default_dict( $taxonomy ) {
-		if ( 'product_cat' === $taxonomy ) {
-			return self::DEFAULT_TRANSLATIONS_PRODUCT_CAT;
-		}
-		if ( 'pa_sesso' === $taxonomy ) {
-			return self::DEFAULT_TRANSLATIONS_PA_SESSO;
-		}
-		return false;
-	}
+        /**
+         * Получить встроенный словарь переводов для таксономии.
+         * Используется для reverse lookup: по русскому имени найти английский оригинал.
+         *
+         * @param string $taxonomy
+         * @return array|false
+         */
+        public function get_default_dict( $taxonomy ) {
+                if ( 'product_cat' === $taxonomy ) {
+                        return self::DEFAULT_TRANSLATIONS_PRODUCT_CAT;
+                }
+                if ( 'pa_sesso' === $taxonomy ) {
+                        return self::DEFAULT_TRANSLATIONS_PA_SESSO;
+                }
+                return false;
+        }
 
 }

@@ -86,58 +86,56 @@ class BSI_Import_Filters {
                         $total_rows = array_sum( $scan_macro );
                         $total_products = array_sum( $macro_products );
                 } elseif ( 'whitelist' === $mode ) {
-                        // Только выбранные.
-                        // Минимум по всем 3 фильтрам (AND логика).
-                        // Считаем сумму по выбранным категориям + брендам + полу.
-                        // Точное число без AND-логики — нужна полноценная фильтрация по строкам.
-                        // Для простоты — показываем сумму по выбранному.
-                        $cat_rows = 0;
-                        $cat_products = 0;
-                        foreach ( $cats as $cat ) {
-                                // Может быть макро или под.
-                                if ( isset( $scan_macro[ $cat ] ) ) {
-                                        $cat_rows += $scan_macro[ $cat ];
-                                        $cat_products += isset( $macro_products[ $cat ] ) ? $macro_products[ $cat ] : 0;
-                                } elseif ( isset( $scan_sub[ $cat ] ) ) {
-                                        $cat_rows += $scan_sub[ $cat ];
-                                        $cat_products += isset( $sub_products[ $cat ] ) ? $sub_products[ $cat ] : 0;
-                                }
-                        }
+				// Только выбранные.
+				$cat_products = 0;
+				foreach ( $cats as $cat ) {
+					if ( isset( $macro_products[ $cat ] ) ) {
+						$cat_products += $macro_products[ $cat ];
+					} elseif ( isset( $sub_products[ $cat ] ) ) {
+						$cat_products += $sub_products[ $cat ];
+					} elseif ( isset( $scan_macro[ $cat ] ) ) {
+						$cat_products += $scan_macro[ $cat ];
+					} elseif ( isset( $scan_sub[ $cat ] ) ) {
+						$cat_products += $scan_sub[ $cat ];
+					}
+				}
 
-                        $brand_rows = 0;
-                        $brand_products_count = 0;
-                        foreach ( $brands as $brand ) {
-                                if ( isset( $scan_brands[ $brand ] ) ) {
-                                        $brand_rows += $scan_brands[ $brand ];
-                                        $brand_products_count += isset( $brand_products[ $brand ] ) ? $brand_products[ $brand ] : 0;
-                                }
-                        }
+				$brand_products_count = 0;
+				foreach ( $brands as $brand ) {
+					if ( isset( $brand_products[ $brand ] ) ) {
+						$brand_products_count += $brand_products[ $brand ];
+					} elseif ( isset( $scan_brands[ $brand ] ) ) {
+						$brand_products_count += $scan_brands[ $brand ];
+					}
+				}
 
-                        $gender_rows = 0;
-                        $gender_products_count = 0;
-                        foreach ( $genders as $gender ) {
-                                if ( isset( $scan_genders[ $gender ] ) ) {
-                                        $gender_rows += $scan_genders[ $gender ];
-                                        $gender_products_count += isset( $gender_products[ $gender ] ) ? $gender_products[ $gender ] : 0;
-                                }
-                        }
+				$gender_products_count = 0;
+				foreach ( $genders as $gender ) {
+					if ( isset( $gender_products[ $gender ] ) ) {
+						$gender_products_count += $gender_products[ $gender ];
+					} elseif ( isset( $scan_genders[ $gender ] ) ) {
+						$gender_products_count += $scan_genders[ $gender ];
+					}
+				}
 
-                        // Если выбраны категории → по ним; если бренды → по ним; если пол → по нему.
-                        // Минимальное из всех выбранных (AND логика — точнее через CSV, но приближённо).
-                        $selected = array();
-                        if ( ! empty( $cats ) ) { $selected[] = $cat_products; }
-                        if ( ! empty( $brands ) ) { $selected[] = $brand_products_count; }
-                        if ( ! empty( $genders ) ) { $selected[] = $gender_products_count; }
+				// Если ничего не выбрано — все товары.
+				if ( empty( $cats ) && empty( $brands ) && empty( $genders ) ) {
+					$total_products = array_sum( $macro_products ) ?: array_sum( $scan_macro );
+					$total_rows = array_sum( $scan_macro );
+				} else {
+					$selected = array();
+					if ( ! empty( $cats ) ) { $selected[] = $cat_products; }
+					if ( ! empty( $brands ) ) { $selected[] = $brand_products_count; }
+					if ( ! empty( $genders ) ) { $selected[] = $gender_products_count; }
 
-                        if ( empty( $selected ) ) {
-                                $total_products = array_sum( $macro_products );
-                                $total_rows = array_sum( $scan_macro );
-                        } else {
-                                // Берём минимум (AND логика: товар должен быть во всех выбранных).
-                                $total_products = min( $selected );
-                                $total_rows = $total_products * 3; // приблизительно (3 варианта на товар)
-                        }
-                } elseif ( 'blacklist' === $mode ) {
+					if ( 1 === count( $selected ) ) {
+						$total_products = $selected[0];
+					} else {
+						$total_products = min( $selected );
+					}
+					$total_rows = $total_products * 3;
+				}
+			} elseif ( 'blacklist' === $mode ) {
                         // Все КРОМЕ выбранных.
                         $total_products = array_sum( $macro_products );
                         $total_rows = array_sum( $scan_macro );

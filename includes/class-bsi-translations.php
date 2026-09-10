@@ -370,6 +370,21 @@ class BSI_Translations {
                                 }
                         }
 
+			// Если и так не нашли — reverse lookup по встроенному словарю.
+			// Это для термов, переименованных ДО v1.9.46 (meta не сохранена).
+			if ( empty( $original_name ) ) {
+				$default_dict = $this->get_default_dict( $taxonomy );
+				if ( $default_dict ) {
+					foreach ( $default_dict as $orig => $ru ) {
+						if ( 0 === strcasecmp( $ru, $term->name ) ) {
+							$original_name = $orig;
+							update_term_meta( $term->term_id, '_bsi_original_name', $orig );
+							break;
+						}
+					}
+				}
+			}
+
                         // Если и так не нашли — оригинал = текущее имя.
                         if ( empty( $original_name ) ) {
                                 $original_name = $term->name;
@@ -385,4 +400,21 @@ class BSI_Translations {
                 }
                 return $result;
         }
+	/**
+	 * Получить встроенный словарь переводов для таксономии.
+	 * Используется для reverse lookup: по русскому имени найти английский оригинал.
+	 *
+	 * @param string $taxonomy
+	 * @return array|false
+	 */
+	public function get_default_dict( $taxonomy ) {
+		if ( 'product_cat' === $taxonomy ) {
+			return self::DEFAULT_TRANSLATIONS_PRODUCT_CAT;
+		}
+		if ( 'pa_sesso' === $taxonomy ) {
+			return self::DEFAULT_TRANSLATIONS_PA_SESSO;
+		}
+		return false;
+	}
+
 }

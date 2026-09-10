@@ -267,6 +267,22 @@ class BSI_GitHub_Updater {
                         $obj->banners                 = array();
 
                         $transient->response[ $this->basename ] = $obj;
+                } else {
+                        // ВАЖНО: если текущая версия >= remote — УДАЛЯЕМ запись из response.
+                        // Иначе WordPress продолжит показывать кнопку "Обновить" даже
+                        // после установки — приходится обновлять 2 раза.
+                        // Причина: transient update_plugins кешируется, и старая запись
+                        // с прежним new_version остаётся. Удаляем её принудительно.
+                        if ( isset( $transient->response[ $this->basename ] ) ) {
+                                unset( $transient->response[ $this->basename ] );
+
+                                if ( class_exists( 'BSI_Logger' ) ) {
+                                        BSI_Logger::instance()->debug( 'updater', 'Удалена устаревшая запись из update_plugins', array(
+                                                'current' => $this->version,
+                                                'remote'  => $remote_version,
+                                        ) );
+                                }
+                        }
                 }
 
                 return $transient;

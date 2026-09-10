@@ -372,17 +372,17 @@ jQuery(document).ready(function($){
 			var genders = [];
 			jQuery('input[name^="bsi_settings[filter_cat_check]"]').each(function() {
 				if (jQuery(this).is(':checked')) {
-					categories.push(jQuery(this).attr('name').match(/\[([^\]]+)\]/)[1]);
+					categories.push(jQuery(this).attr('name').match(/\]\[([^\]]+)\]/)[1]);
 				}
 			});
 			jQuery('input[name^="bsi_settings[filter_brand_check]"]').each(function() {
 				if (jQuery(this).is(':checked')) {
-					brands.push(jQuery(this).attr('name').match(/\[([^\]]+)\]/)[1]);
+					brands.push(jQuery(this).attr('name').match(/\]\[([^\]]+)\]/)[1]);
 				}
 			});
 			jQuery('input[name^="bsi_settings[filter_gender_check]"]').each(function() {
 				if (jQuery(this).is(':checked')) {
-					genders.push(jQuery(this).attr('name').match(/\[([^\]]+)\]/)[1]);
+					genders.push(jQuery(this).attr('name').match(/\]\[([^\]]+)\]/)[1]);
 				}
 			});
 			jQuery('#bsi-preview-status').html('<span class="spinner is-active" style="float:none;vertical-align:middle;"></span> Считаем...');

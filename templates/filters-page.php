@@ -85,7 +85,44 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_
                                 </table>
                         </div>
 
-                        <!-- Макро-категории -->
+                        			<!-- Вкладки фильтров -->
+			<h2 class="bsi-filter-tabs" style="margin:15px 0 20px;border-bottom:1px solid #c3c4c7;">
+				<a href="#" class="bsi-filter-tab bsi-filter-tab-active" data-tab="macro">
+					<span class="dashicons dashicons-category" style="vertical-align:middle;margin-right:4px;"></span>
+					Макро-категории (<?php echo esc_html( count( $scan_macro ) ); ?>)
+				</a>
+				<a href="#" class="bsi-filter-tab" data-tab="sub">
+					<span class="dashicons dashicons-categories" style="vertical-align:middle;margin-right:4px;"></span>
+					Подкатегории (<?php echo esc_html( count( $scan_sub ) ); ?>)
+				</a>
+				<a href="#" class="bsi-filter-tab" data-tab="brands">
+					<span class="dashicons dashicons-store" style="vertical-align:middle;margin-right:4px;"></span>
+					Бренды (<?php echo esc_html( count( $scan_brands ) ); ?>)
+				</a>
+				<a href="#" class="bsi-filter-tab" data-tab="gender">
+					<span class="dashicons dashicons-groups" style="vertical-align:middle;margin-right:4px;"></span>
+					Пол (<?php echo esc_html( count( $scan_genders ) ); ?>)
+				</a>
+			</h2>
+
+			<style>
+			.bsi-filter-tabs { display:flex; gap:2px; flex-wrap:wrap; }
+			.bsi-filter-tab {
+				display:inline-block; padding:8px 14px; margin:0 1px -1px 0;
+				background:#f0f0f1; border:1px solid #c3c4c7; border-bottom:none;
+				border-radius:4px 4px 0 0; text-decoration:none; color:#50575e;
+				font-weight:500; font-size:13px; line-height:1.5; cursor:pointer;
+			}
+			.bsi-filter-tab:hover { background:#e5e5e7; color:#1d2327; }
+			.bsi-filter-tab-active {
+				background:#fff; border-bottom:1px solid #fff;
+				color:#1d2327; font-weight:600;
+			}
+			</style>
+
+			<!-- TAB: macro -->
+			<div class="bsi-filter-tab-content" data-tab="macro" style="display:block;">
+			<!-- Макро-категории -->
                         <?php if ( ! empty( $scan_macro ) ) : ?>
                         <div class="bsi-card">
                                 <h2><?php esc_html_e( 'Макро-категории', 'beestore-integration' ); ?> (<?php echo esc_html( count( $scan_macro ) ); ?>)</h2>
@@ -117,7 +154,10 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_
                         </div>
                         <?php endif; ?>
 
-                        <!-- Подкатегории -->
+                        			<!-- TAB: sub -->
+			</div>
+			<div class="bsi-filter-tab-content" data-tab="sub" style="display:none;">
+			<!-- Подкатегории -->
                         <?php if ( ! empty( $scan_sub ) ) : ?>
                         <div class="bsi-card">
                                 <h2><?php esc_html_e( 'Подкатегории', 'beestore-integration' ); ?> (<?php echo esc_html( count( $scan_sub ) ); ?>)</h2>
@@ -153,7 +193,10 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_
                         </div>
                         <?php endif; ?>
 
-                        <!-- Бренды -->
+                        			<!-- TAB: brands -->
+			</div>
+			<div class="bsi-filter-tab-content" data-tab="brands" style="display:none;">
+			<!-- Бренды -->
                         <?php if ( ! empty( $scan_brands ) ) : ?>
                         <div class="bsi-card">
                                 <h2><?php esc_html_e( 'Бренды', 'beestore-integration' ); ?> (<?php echo esc_html( count( $scan_brands ) ); ?>)</h2>
@@ -188,6 +231,9 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_
                         <?php endif; ?>
 
                 
+						<!-- TAB: gender -->
+			</div>
+			<div class="bsi-filter-tab-content" data-tab="gender" style="display:none;">
 			<!-- Пол -->
 			<?php if ( ! empty( $scan_genders ) ) : ?>
 			<div class="bsi-card">
@@ -217,6 +263,8 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_
 				</table>
 			</div>
 			<?php endif; ?>
+
+						</div>
 
 			<?php submit_button( __( 'Сохранить фильтры', 'beestore-integration' ) ); ?>
         </form>
@@ -300,4 +348,15 @@ jQuery(document).ready(function($){
                 $('#' + $(this).data('target') + ' input[type="checkbox"]').prop('checked', false);
         });
 });
+
+		// Переключение вкладок фильтров.
+		$('.bsi-filter-tab').on('click', function(e) {
+			e.preventDefault();
+			var tab = $(this).data('tab');
+			$('.bsi-filter-tab').removeClass('bsi-filter-tab-active');
+			$(this).addClass('bsi-filter-tab-active');
+			$('.bsi-filter-tab-content').hide();
+			$('.bsi-filter-tab-content[data-tab="' + tab + '"]').show();
+		});
+
 </script>

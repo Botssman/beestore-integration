@@ -39,7 +39,141 @@ class BSI_Import_Filters {
                 return self::$instance;
         }
 
-        private function __construct() {}
+        private function __construct() {
+                // AJAX: предпросмотр количества товаров по выбранным фильтрам.
+                add_action( 'wp_ajax_bsi_preview_filter_count', array( $this, 'ajax_preview_filter_count' ) );
+        }
+
+        /**
+         * AJAX: посчитать сколько УНИКАЛЬНЫХ товаров (не строк!) будет импортировано
+         * при текущих выбранных фильтрах. Использует данные сканирования.
+         */
+        public function ajax_preview_filter_count() {
+                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
+                if ( ! current_user_can( 'manage_woocommerce' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
+                }
+
+                $scan = $this->get_scan_results();
+                if ( ! $scan ) {
+                        wp_send_json_error( array( 'message' => __( 'Сначала сканируйте CSV.', 'beestore-integration' ) ) );
+                }
+
+                // Получаем выбранные фильтры из POST.
+                $mode = isset( $_POST['mode'] ) ? sanitize_text_field( wp_unslash( $_POST['mode'] ) ) : 'all';
+                $cats = isset( $_POST['categories'] ) && is_array( $_POST['categories'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['categories'] ) ) : array();
+                $brands = isset( $_POST['brands'] ) && is_array( $_POST['brands'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['brands'] ) ) : array();
+                $genders = isset( $_POST['genders'] ) && is_array( $_POST['genders'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['genders'] ) ) : array();
+
+                // Данные сканирования (строки).
+                $scan_macro  = isset( $scan['macro'] ) ? $scan['macro'] : array();
+                $scan_sub    = isset( $scan['sub'] ) ? $scan['sub'] : array();
+                $scan_brands = isset( $scan['brands'] ) ? $scan['brands'] : array();
+                $scan_genders = isset( $scan['genders'] ) ? $scan['genders'] : array();
+
+                // Данные сканирования (уникальные товары).
+                $macro_products  = isset( $scan['macro_products'] ) ? $scan['macro_products'] : array();
+                $sub_products    = isset( $scan['sub_products'] ) ? $scan['sub_products'] : array();
+                $brand_products  = isset( $scan['brand_products'] ) ? $scan['brand_products'] : array();
+                $gender_products = isset( $scan['gender_products'] ) ? $scan['gender_products'] : array();
+
+                // Считаем.
+                $total_rows = 0;
+                $total_products = 0;
+
+                if ( 'all' === $mode ) {
+                        // Все товары — считаем все строки и все уникальные IGU.
+                        $total_rows = array_sum( $scan_macro );
+                        $total_products = array_sum( $macro_products );
+                } elseif ( 'whitelist' === $mode ) {
+                        // Только выбранные.
+                        // Минимум по всем 3 фильтрам (AND логика).
+                        // Считаем сумму по выбранным категориям + брендам + полу.
+                        // Точное число без AND-логики — нужна полноценная фильтрация по строкам.
+                        // Для простоты — показываем сумму по выбранному.
+                        $cat_rows = 0;
+                        $cat_products = 0;
+                        foreach ( $cats as $cat ) {
+                                // Может быть макро или под.
+                                if ( isset( $scan_macro[ $cat ] ) ) {
+                                        $cat_rows += $scan_macro[ $cat ];
+                                        $cat_products += isset( $macro_products[ $cat ] ) ? $macro_products[ $cat ] : 0;
+                                } elseif ( isset( $scan_sub[ $cat ] ) ) {
+                                        $cat_rows += $scan_sub[ $cat ];
+                                        $cat_products += isset( $sub_products[ $cat ] ) ? $sub_products[ $cat ] : 0;
+                                }
+                        }
+
+                        $brand_rows = 0;
+                        $brand_products_count = 0;
+                        foreach ( $brands as $brand ) {
+                                if ( isset( $scan_brands[ $brand ] ) ) {
+                                        $brand_rows += $scan_brands[ $brand ];
+                                        $brand_products_count += isset( $brand_products[ $brand ] ) ? $brand_products[ $brand ] : 0;
+                                }
+                        }
+
+                        $gender_rows = 0;
+                        $gender_products_count = 0;
+                        foreach ( $genders as $gender ) {
+                                if ( isset( $scan_genders[ $gender ] ) ) {
+                                        $gender_rows += $scan_genders[ $gender ];
+                                        $gender_products_count += isset( $gender_products[ $gender ] ) ? $gender_products[ $gender ] : 0;
+                                }
+                        }
+
+                        // Если выбраны категории → по ним; если бренды → по ним; если пол → по нему.
+                        // Минимальное из всех выбранных (AND логика — точнее через CSV, но приближённо).
+                        $selected = array();
+                        if ( ! empty( $cats ) ) { $selected[] = $cat_products; }
+                        if ( ! empty( $brands ) ) { $selected[] = $brand_products_count; }
+                        if ( ! empty( $genders ) ) { $selected[] = $gender_products_count; }
+
+                        if ( empty( $selected ) ) {
+                                $total_products = array_sum( $macro_products );
+                                $total_rows = array_sum( $scan_macro );
+                        } else {
+                                // Берём минимум (AND логика: товар должен быть во всех выбранных).
+                                $total_products = min( $selected );
+                                $total_rows = $total_products * 3; // приблизительно (3 варианта на товар)
+                        }
+                } elseif ( 'blacklist' === $mode ) {
+                        // Все КРОМЕ выбранных.
+                        $total_products = array_sum( $macro_products );
+                        $total_rows = array_sum( $scan_macro );
+
+                        // Вычитаем выбранные.
+                        foreach ( $cats as $cat ) {
+                                if ( isset( $macro_products[ $cat ] ) ) {
+                                        $total_products -= $macro_products[ $cat ];
+                                } elseif ( isset( $sub_products[ $cat ] ) ) {
+                                        $total_products -= $sub_products[ $cat ];
+                                }
+                        }
+                        foreach ( $brands as $brand ) {
+                                if ( isset( $brand_products[ $brand ] ) ) {
+                                        $total_products -= $brand_products[ $brand ];
+                                }
+                        }
+                        foreach ( $genders as $gender ) {
+                                if ( isset( $gender_products[ $gender ] ) ) {
+                                        $total_products -= $gender_products[ $gender ];
+                                }
+                        }
+                        $total_rows = $total_products * 3;
+                }
+
+                wp_send_json_success( array(
+                        'products' => max( 0, $total_products ),
+                        'rows'     => max( 0, $total_rows ),
+                        'message'  => sprintf(
+                                /* translators: 1: товаров, 2: строк */
+                                __( 'Будет импортировано ~%1$d товаров (%2$d строк)', 'beestore-integration' ),
+                                max( 0, $total_products ),
+                                max( 0, $total_rows )
+                        ),
+                ) );
+        }
 
         /**
          * Получить настройки фильтров.
@@ -242,6 +376,16 @@ class BSI_Import_Filters {
                         'sub'       => array(),
                         'brands'    => array(),
                         'genders'   => array(),
+                        'igu_seen'  => array(
+                                'macro'  => array(),
+                                'sub'    => array(),
+                                'brand'  => array(),
+                                'gender' => array(),
+                        ),
+                        'macro_products'  => array(),
+                        'sub_products'    => array(),
+                        'brand_products'  => array(),
+                        'gender_products' => array(),
                         'scanning'  => true,
                 );
                 update_option( 'bsi_scan_state', $state, false );
@@ -290,6 +434,18 @@ class BSI_Import_Filters {
                 $sub    = isset( $state['sub'] ) ? $state['sub'] : array();
                 $brands = isset( $state['brands'] ) ? $state['brands'] : array();
                 $genders = isset( $state['genders'] ) ? $state['genders'] : array();
+                // Уникальные IGUArticolo для подсчёта товаров (а не строк).
+                $igu_seen = isset( $state['igu_seen'] ) ? $state['igu_seen'] : array(
+                        'macro'  => array(),
+                        'sub'    => array(),
+                        'brand'  => array(),
+                        'gender' => array(),
+                );
+                // Счётчики товаров (а не строк).
+                $macro_products  = isset( $state['macro_products'] ) ? $state['macro_products'] : array();
+                $sub_products    = isset( $state['sub_products'] ) ? $state['sub_products'] : array();
+                $brand_products  = isset( $state['brand_products'] ) ? $state['brand_products'] : array();
+                $gender_products = isset( $state['gender_products'] ) ? $state['gender_products'] : array();
 
                 while ( ! feof( $handle ) && $count < $batch ) {
                         $line = fgets( $handle, 1048576 );
@@ -368,6 +524,44 @@ class BSI_Import_Filters {
                                 }
                                 $genders[ $gender ]++;
                         }
+
+                        // Подсчёт уникальных товаров (IGUArticolo) для каждого фильтра.
+                        $igu = isset( $row_data['IGUArticolo'] ) ? trim( $row_data['IGUArticolo'] ) : '';
+                        if ( $igu ) {
+                                $igu_key = $igu;
+                                // Мacro: считаем уникальные IGU для каждой макро-категории.
+                                if ( $macro_name && ! isset( $igu_seen['macro'][ $macro_name . '|' . $igu ] ) ) {
+                                        $igu_seen['macro'][ $macro_name . '|' . $igu ] = true;
+                                        if ( ! isset( $macro_products[ $macro_name ] ) ) {
+                                                $macro_products[ $macro_name ] = 0;
+                                        }
+                                        $macro_products[ $macro_name ]++;
+                                }
+                                // Sub: уникальные для подкатегории.
+                                if ( $sub_name && ! isset( $igu_seen['sub'][ $sub_name . '|' . $igu ] ) ) {
+                                        $igu_seen['sub'][ $sub_name . '|' . $igu ] = true;
+                                        if ( ! isset( $sub_products[ $sub_name ] ) ) {
+                                                $sub_products[ $sub_name ] = 0;
+                                        }
+                                        $sub_products[ $sub_name ]++;
+                                }
+                                // Brand: уникальные для бренда.
+                                if ( $brand && ! isset( $igu_seen['brand'][ $brand . '|' . $igu ] ) ) {
+                                        $igu_seen['brand'][ $brand . '|' . $igu ] = true;
+                                        if ( ! isset( $brand_products[ $brand ] ) ) {
+                                                $brand_products[ $brand ] = 0;
+                                        }
+                                        $brand_products[ $brand ]++;
+                                }
+                                // Gender: уникальные для пола.
+                                if ( $gender && ! isset( $igu_seen['gender'][ $gender . '|' . $igu ] ) ) {
+                                        $igu_seen['gender'][ $gender . '|' . $igu ] = true;
+                                        if ( ! isset( $gender_products[ $gender ] ) ) {
+                                                $gender_products[ $gender ] = 0;
+                                        }
+                                        $gender_products[ $gender ]++;
+                                }
+                        }
                 }
 
                 // Сохраняем позицию файла (fgets не буферизует — ftell точный).
@@ -382,6 +576,11 @@ class BSI_Import_Filters {
                 $state['sub']       = $sub;
                 $state['brands']    = $brands;
                 $state['genders']   = $genders;
+                $state['igu_seen']  = $igu_seen;
+                $state['macro_products']  = $macro_products;
+                $state['sub_products']    = $sub_products;
+                $state['brand_products']  = $brand_products;
+                $state['gender_products'] = $gender_products;
 
                 $done = $at_eof || ( 0 === $count );
                 $state['scanning'] = ! $done;

@@ -282,6 +282,25 @@ class BSI_GitHub_Updater {
                                                 'remote'  => $remote_version,
                                         ) );
                                 }
+
+				// Добавляем в no_update — говорит WP "плагин проверен, обновлений нет".
+				if ( ! isset( $transient->no_update ) ) {
+					$transient->no_update = array();
+				}
+				$no_update_obj = new stdClass();
+				$no_update_obj->slug = $this->slug;
+				$no_update_obj->plugin = $this->basename;
+				$no_update_obj->new_version = $remote_version;
+				$no_update_obj->url = 'https://github.com/' . $this->github_repo;
+				$no_update_obj->package = $this->get_zip_url( $release );
+				$transient->no_update[ $this->basename ] = $no_update_obj;
+
+				if ( class_exists( 'BSI_Logger' ) ) {
+					BSI_Logger::instance()->debug( 'updater', 'Добавлен в no_update (обновлений нет)', array(
+						'current' => $this->version,
+						'remote'  => $remote_version,
+					) );
+				}
                         }
                 }
 

@@ -266,7 +266,13 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_
 
                                                 </div>
 
-                        <?php submit_button( __( 'Сохранить фильтры', 'beestore-integration' ) ); ?>
+                        		<!-- Предпросмотр количества товаров -->
+		<div class="bsi-card" style="background:#f0f6ff;border-left:4px solid #2271b1;">
+			<h2 style="margin-top:0;color:#2271b1;">📊 Предпросмотр импорта</h2>
+			<p id="bsi-preview-status" style="font-size:14px;">Нажмите галочки в фильтрах выше — здесь покажем сколько товаров будет импортировано.</p>
+		</div>
+
+		<?php submit_button( __( 'Сохранить фильтры', 'beestore-integration' ) ); ?>
         </form>
         <?php else : ?>
                 <div class="bsi-card">
@@ -357,6 +363,52 @@ jQuery(document).ready(function($){
                         $('.bsi-filter-tab-content').hide();
                         $('.bsi-filter-tab-content[data-tab="' + tab + '"]').show();
                 });
+		// Предпросмотр количества товаров.
+		var previewTimer = null;
+		function updatePreview() {
+			var mode = jQuery('input[name="bsi_settings[import_filter_mode]"]:checked').val() || 'all';
+			var categories = [];
+			var brands = [];
+			var genders = [];
+			jQuery('input[name^="bsi_settings[filter_cat_check]"]').each(function() {
+				if (jQuery(this).is(':checked')) {
+					categories.push(jQuery(this).attr('name').match(/\[([^\]]+)\]/)[1]);
+				}
+			});
+			jQuery('input[name^="bsi_settings[filter_brand_check]"]').each(function() {
+				if (jQuery(this).is(':checked')) {
+					brands.push(jQuery(this).attr('name').match(/\[([^\]]+)\]/)[1]);
+				}
+			});
+			jQuery('input[name^="bsi_settings[filter_gender_check]"]').each(function() {
+				if (jQuery(this).is(':checked')) {
+					genders.push(jQuery(this).attr('name').match(/\[([^\]]+)\]/)[1]);
+				}
+			});
+			jQuery('#bsi-preview-status').html('<span class="spinner is-active" style="float:none;vertical-align:middle;"></span> Считаем...');
+			jQuery.post(bsiAdmin.ajaxUrl, {
+				action: 'bsi_preview_filter_count',
+				nonce: bsiAdmin.nonce,
+				mode: mode,
+				categories: categories,
+				brands: brands,
+				genders: genders
+			}, function(response) {
+				if (response.success) {
+					jQuery('#bsi-preview-status').html('<span style="color:#2271b1;font-weight:600;">📊 ' + response.data.message + '</span>');
+				} else {
+					jQuery('#bsi-preview-status').html('<span style="color:#666;">' + (response.data.message || '') + '</span>');
+				}
+			}).fail(function() {
+				jQuery('#bsi-preview-status').html('<span style="color:#c62828;">AJAX error</span>');
+			});
+		}
+		jQuery(document).on('change', 'input[name^="bsi_settings[filter_cat_check]"], input[name^="bsi_settings[filter_brand_check]"], input[name^="bsi_settings[filter_gender_check]"], input[name="bsi_settings[import_filter_mode]"]', function() {
+			if (previewTimer) clearTimeout(previewTimer);
+			previewTimer = setTimeout(updatePreview, 500);
+		});
+		updatePreview();
+
 });
 
 </script>

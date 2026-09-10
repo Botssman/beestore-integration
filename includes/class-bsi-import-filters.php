@@ -85,71 +85,71 @@ class BSI_Import_Filters {
                         // Все товары — считаем все строки и все уникальные IGU.
                         $total_rows = array_sum( $scan_macro );
                         $total_products = array_sum( $macro_products );
-                } elseif ( 'whitelist' === \$mode ) {
+                } elseif ( 'whitelist' === $mode ) {
 				// Только выбранные.
 				// Логика: если тип фильтра НЕ выбран — не учитываем его (PHP_INT_MAX).
 				// Если выбран — берём сумму по выбранным.
 				// Если выбраны несколько типов — минимум (AND логика).
 
-				\$cat_products = 0;
-				\$cat_selected = ! empty( \$cats );
-				if ( \$cat_selected ) {
-					foreach ( \$cats as \$cat ) {
-						if ( isset( \$macro_products[ \$cat ] ) ) {
-							\$cat_products += \$macro_products[ \$cat ];
-						} elseif ( isset( \$sub_products[ \$cat ] ) ) {
-							\$cat_products += \$sub_products[ \$cat ];
-						} elseif ( isset( \$scan_macro[ \$cat ] ) ) {
-							\$cat_products += \$scan_macro[ \$cat ];
-						} elseif ( isset( \$scan_sub[ \$cat ] ) ) {
-							\$cat_products += \$scan_sub[ \$cat ];
+				$cat_products = 0;
+				$cat_selected = ! empty( $cats );
+				if ( $cat_selected ) {
+					foreach ( $cats as $cat ) {
+						if ( isset( $macro_products[ $cat ] ) ) {
+							$cat_products += $macro_products[ $cat ];
+						} elseif ( isset( $sub_products[ $cat ] ) ) {
+							$cat_products += $sub_products[ $cat ];
+						} elseif ( isset( $scan_macro[ $cat ] ) ) {
+							$cat_products += $scan_macro[ $cat ];
+						} elseif ( isset( $scan_sub[ $cat ] ) ) {
+							$cat_products += $scan_sub[ $cat ];
 						}
 					}
 				} else {
-					\$cat_products = PHP_INT_MAX;
+					$cat_products = PHP_INT_MAX;
 				}
 
-				\$brand_products_count = 0;
-				\$brand_selected = ! empty( \$brands );
-				if ( \$brand_selected ) {
-					foreach ( \$brands as \$brand ) {
-						if ( isset( \$brand_products[ \$brand ] ) ) {
-							\$brand_products_count += \$brand_products[ \$brand ];
-						} elseif ( isset( \$scan_brands[ \$brand ] ) ) {
-							\$brand_products_count += \$scan_brands[ \$brand ];
+				$brand_products_count = 0;
+				$brand_selected = ! empty( $brands );
+				if ( $brand_selected ) {
+					foreach ( $brands as $brand ) {
+						if ( isset( $brand_products[ $brand ] ) ) {
+							$brand_products_count += $brand_products[ $brand ];
+						} elseif ( isset( $scan_brands[ $brand ] ) ) {
+							$brand_products_count += $scan_brands[ $brand ];
 						}
 					}
 				} else {
-					\$brand_products_count = PHP_INT_MAX;
+					$brand_products_count = PHP_INT_MAX;
 				}
 
-				\$gender_products_count = 0;
-				\$gender_selected = ! empty( \$genders );
-				if ( \$gender_selected ) {
-					foreach ( \$genders as \$gender ) {
-						if ( isset( \$gender_products[ \$gender ] ) ) {
-							\$gender_products_count += \$gender_products[ \$gender ];
-						} elseif ( isset( \$scan_genders[ \$gender ] ) ) {
-							\$gender_products_count += \$scan_genders[ \$gender ];
+				$gender_products_count = 0;
+				$gender_selected = ! empty( $genders );
+				if ( $gender_selected ) {
+					foreach ( $genders as $gender ) {
+						if ( isset( $gender_products[ $gender ] ) ) {
+							$gender_products_count += $gender_products[ $gender ];
+						} elseif ( isset( $scan_genders[ $gender ] ) ) {
+							$gender_products_count += $scan_genders[ $gender ];
 						}
 					}
 				} else {
-					\$gender_products_count = PHP_INT_MAX;
+					$gender_products_count = PHP_INT_MAX;
 				}
 
 				// Если ничего не выбрано — все товары.
-				if ( ! \$cat_selected && ! \$brand_selected && ! \$gender_selected ) {
-					\$total_products = array_sum( \$macro_products ) ?: array_sum( \$scan_macro );
-					\$total_rows = array_sum( \$scan_macro );
+				if ( ! $cat_selected && ! $brand_selected && ! $gender_selected ) {
+					$total_products = array_sum( $macro_products ) ?: array_sum( $scan_macro );
+					$total_rows = array_sum( $scan_macro );
 				} else {
 					// Берём минимум из всех активных фильтров (AND логика).
-					\$total_products = min( \$cat_products, \$brand_products_count, \$gender_products_count );
-					if ( PHP_INT_MAX === \$total_products ) {
-						\$total_products = array_sum( \$macro_products ) ?: array_sum( \$scan_macro );
+					$total_products = min( $cat_products, $brand_products_count, $gender_products_count );
+					if ( PHP_INT_MAX === $total_products ) {
+						$total_products = array_sum( $macro_products ) ?: array_sum( $scan_macro );
 					}
-					\$total_rows = \$total_products * 3;
+					$total_rows = $total_products * 3;
 				}
-			} elseif ( 'blacklist' === \$mode ) {
+			} elseif ( 'blacklist' === $mode ) {
                         // Все КРОМЕ выбранных.
                         $total_products = array_sum( $macro_products );
                         $total_rows = array_sum( $scan_macro );

@@ -286,10 +286,33 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                 <tr>
                                         <th><label for="novelties_season">Сезон новинок</label></th>
                                         <td>
-                                                <input type="text" name="bsi_settings[novelties_season]" id="novelties_season" value="<?php echo esc_attr( isset( $settings['novelties_season'] ) ? $settings['novelties_season'] : '' ); ?>" class="regular-text" placeholder="26W">
-                                                <p class="description">
-                                                        Текущий сезон BeeStore (например 26W, 27S). Товары этого сезона помечаются тегом «Новинки» (slug = novinki). При смене сезона — старые товары теряют тег, новые получают.
-                                                </p>
+					<?php
+					$available_seasons = class_exists( 'BSI_Novelties' ) ? BSI_Novelties::instance()->get_available_seasons() : array();
+					$current_season_value = isset( $settings['novelties_season'] ) ? $settings['novelties_season'] : '';
+					$latest_season = class_exists( 'BSI_Novelties' ) ? BSI_Novelties::instance()->get_latest_season() : '';
+					?>
+					<select name="bsi_settings[novelties_season]" id="novelties_season">
+						<option value="auto" <?php selected( $current_season_value, 'auto' ); ?>>
+							Авто (самый свежий)<?php if ( $latest_season ) : ?> — <?php echo esc_html( $latest_season ); ?><?php endif; ?>
+						</option>
+						<?php if ( ! empty( $available_seasons ) ) : ?>
+							<optgroup label="Выбрать вручную">
+								<?php foreach ( $available_seasons as $season ) : ?>
+									<option value="<?php echo esc_attr( $season ); ?>" <?php selected( $current_season_value, $season ); ?>>
+										<?php echo esc_html( $season ); ?>
+									</option>
+								<?php endforeach; ?>
+							</optgroup>
+						<?php else : ?>
+							<option value="" disabled>(сезоны появятся после импорта)</option>
+						<?php endif; ?>
+					</select>
+					<p class="description">
+						Товары этого сезона помечаются тегом «Новинки» (slug = novinki). При смене сезона — старые товары теряют тег, новые получают.
+						<?php if ( $latest_season ) : ?>
+							<br><strong>Самый свежий сезон в каталоге:</strong> <?php echo esc_html( $latest_season ); ?>
+						<?php endif; ?>
+					</p>
                                                 <p>
                                                         <button type="button" class="button button-secondary" id="bsi-apply-novelties-btn">
                                                                 <span class="dashicons dashicons-tag"></span>

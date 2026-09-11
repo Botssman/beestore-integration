@@ -47,12 +47,96 @@ class BSI_Novelties {
 
         /**
          * Получить текущий сезон из настроек.
+         * Если не задан — автоматически определяем самый свежий.
          *
          * @return string Например '26W'.
          */
         public function get_current_season() {
                 $settings = get_option( 'bsi_settings', array() );
-                return isset( $settings['novelties_season'] ) ? trim( $settings['novelties_season'] ) : '';
+                $saved = isset( $settings['novelties_season'] ) ? trim( $settings['novelties_season'] ) : '';
+
+                // Если задано 'auto' или пусто — берём самый свежий автоматически.
+                if ( empty( $saved ) || 'auto' === strtolower( $saved ) ) {
+                        return $this->get_latest_season();
+                }
+
+                return $saved;
+        }
+
+        /**
+         * Получить список всех сезонов из БД (meta _bsi_season у товаров).
+         *
+         * @return array Сезоны отсортированные от новых к старым.
+         */
+        public function get_available_seasons() {
+                global $wpdb;
+
+                // Прямой SQL — получаем все уникальные значения _bsi_season.
+                $seasons = $wpdb->get_col(
+                        "SELECT DISTINCT pm.meta_value
+                         FROM {$wpdb->postmeta} pm
+                         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+                           AND p.post_type = 'product'
+                           AND p.post_status != 'trash'
+                         WHERE pm.meta_key = '_bsi_season'
+                           AND pm.meta_value != ''"
+                );
+
+                if ( empty( $seasons ) ) {
+                        return array();
+                }
+
+                // Уникальные.
+                $seasons = array_unique( $seasons );
+
+                // Сортируем: парсим год + сезон (W=зима/весна, S=лето, PI=pre-fall, etc).
+                // Формат: "26W", "25S", "26PI", "24W" и т.д.
+                // Сортировка: год DESC, потом сезон DESC (W=весна, S=лето → S > W в одном году).
+                usort( $seasons, function( $a, $b ) {
+                        $pa = $this->parse_season( $a );
+                        $pb = $this->parse_season( $b );
+                        // Сравниваем год (обратный порядок).
+                        if ( $pa['year'] !== $pb['year'] ) {
+                                return $pb['year'] - $pa['year'];
+                        }
+                        // Тот же год — сравниваем сезон (S > W > PI > другие).
+                        $order = array( 'S' => 4, 'W' => 3, 'PI' => 2, 'PE' => 1 );
+                        $oa = isset( $order[ $pa['season'] ] ) ? $order[ $pa['season'] ] : 0;
+                        $ob = isset( $order[ $pb['season'] ] ) ? $order[ $pb['season'] ] : 0;
+                        return $ob - $oa;
+                });
+
+                return $seasons;
+        }
+
+        /**
+         * Получить самый свежий сезон.
+         *
+         * @return string
+         */
+        public function get_latest_season() {
+                $seasons = $this->get_available_seasons();
+                return ! empty( $seasons ) ? $seasons[0] : '';
+        }
+
+        /**
+         * Разобрать строку сезона на год + сезон.
+         * "26W" → ['year' => 26, 'season' => 'W']
+         * "25S" → ['year' => 25, 'season' => 'S']
+         *
+         * @param string $season
+         * @return array
+         */
+        private function parse_season( $season ) {
+                $season = trim( $season );
+                if ( preg_match( '/^(\d{2})([A-Z]{1,2})$/i', $season, $m ) ) {
+                        return array(
+                                'year'    => (int) $m[1],
+                                'season'  => strtoupper( $m[2] ),
+                        );
+                }
+                // Если не парсится — сортируем как строку.
+                return array( 'year' => 0, 'season' => $season );
         }
 
         /**

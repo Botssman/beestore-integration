@@ -445,6 +445,14 @@ class BSI_Translations {
                         // Получаем оригинальное имя из meta (если есть).
                         $original_name = get_term_meta( $term->term_id, '_bsi_original_name', true );
 
+                        // ВАЖНО: если meta содержит русские буквы — она сохранена с багом
+                        // (предыдущие версии сохраняли русское имя вместо английского).
+                        // Удаляем её и делаем reverse lookup заново.
+                        if ( ! empty( $original_name ) && preg_match( '/[а-яё]/i', $original_name ) ) {
+                                delete_term_meta( $term->term_id, '_bsi_original_name' );
+                                $original_name = '';
+                        }
+
                         // Если meta нет — reverse lookup по сохранённым переводам.
                         if ( empty( $original_name ) ) {
                                 $saved = $this->get_translations( $taxonomy );

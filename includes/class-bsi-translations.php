@@ -454,18 +454,22 @@ class BSI_Translations {
                         }
 
                         // Если meta нет — reverse lookup по сохранённым переводам.
+                        // НО: если найденный оригинал содержит русские буквы — пропускаем
+                        // (переводы могли сохраниться с русским ключом, это баг).
                         if ( empty( $original_name ) ) {
                                 $saved = $this->get_translations( $taxonomy );
                                 foreach ( $saved as $orig => $ru ) {
                                         if ( 0 === strcasecmp( $ru, $term->name ) ) {
-                                                $original_name = $orig;
-                                                break;
+                                                // Проверяем что найденный оригинал — английский.
+                                                if ( ! preg_match( '/[а-яё]/i', $orig ) ) {
+                                                        $original_name = $orig;
+                                                        break;
+                                                }
                                         }
                                 }
                         }
 
                         // Если и так не нашли — reverse lookup по встроенному словарю.
-                        // Это для термов, переименованных ДО v1.9.46 (meta не сохранена).
                         if ( empty( $original_name ) ) {
                                 $default_dict = $this->get_default_dict( $taxonomy );
                                 if ( $default_dict ) {
@@ -477,7 +481,6 @@ class BSI_Translations {
                                                 }
                                         }
                                         // Если не нашли по имени — ищем по slug.
-                                        // slug 'ballerinas' → ключ словаря 'BALLERINAS'.
                                         if ( empty( $original_name ) && ! empty( $term->slug ) ) {
                                                 foreach ( $default_dict as $orig => $ru ) {
                                                         if ( 0 === strcasecmp( str_replace( array( '-', ' ' ), '_', $orig ), str_replace( array( '-', ' ' ), '_', $term->slug ) ) ) {

@@ -49,6 +49,10 @@ class BSI_Importer {
                 // Новые AJAX-эндпоинты для импорта с сохранением прогресса.
                 add_action( 'wp_ajax_bsi_import_start', array( $this, 'ajax_import_start' ) );
                 add_action( 'wp_ajax_bsi_import_process_batch', array( $this, 'ajax_import_process_batch' ) );
+
+                // Фоновый процесс — не зависит от вкладки и посещений.
+                add_action( 'wp_ajax_bsi_import_run_background', array( $this, 'ajax_import_run_background' ) );
+                add_action( 'wp_ajax_nopriv_bsi_import_run_background', array( $this, 'ajax_import_run_background' ) );
                 add_action( 'wp_ajax_bsi_import_pause', array( $this, 'ajax_import_pause' ) );
                 add_action( 'wp_ajax_bsi_import_continue', array( $this, 'ajax_import_continue' ) );
                 add_action( 'wp_ajax_bsi_import_stop', array( $this, 'ajax_import_stop' ) );
@@ -356,12 +360,13 @@ class BSI_Importer {
                 update_option( 'bsi_last_import_zip', $remote_name );
                 update_option( 'bsi_last_import_started', current_time( 'mysql' ) );
 
-                // Планируем фоновую обработку через WP-Cron.
-                // Если пользователь закроет вкладку — cron подхватит импорт автоматически.
-                // Cron запускается через 2 минуты и проверяет — если last_update устарел
-                // (> 30 сек), значит вкладка закрылась → обрабатывает батчи сам.
+                // Планируем фоновую обработку через WP-Cron (как запасной вариант).
                 $next = time() + 120;
                 wp_schedule_single_event( $next, 'bsi_cron_background_batch' );
+
+                // ЗАПУСКАЕМ НАСТОЯЩИЙ ФОНОВЫЙ ПРОЦЕСС — не зависит от посещений!
+                // PHP процесс продолжит работать даже после закрытия вкладки.
+                $this->spawn_background_process();
 
                 $this->log( 'info', 'Старт импорта (новая система с прогрессом)', array(
                         'file'        => $remote_name,
@@ -374,6 +379,118 @@ class BSI_Importer {
                         'message'     => sprintf( __( 'Импорт запущен. Файл: %s, строк: %d', 'beestore-integration' ), $remote_name, $total_rows ),
                         'state'       => $new_state,
                 ) );
+        }
+
+        /**
+         * Запустить фоновый процесс — non-blocking HTTP запрос к самому себе.
+         * PHP процесс продолжит работать даже после закрытия вкладки браузера.
+         */
+        private function spawn_background_process() {
+                $token = wp_generate_password( 32, false );
+                update_option( 'bsi_background_token', $token, false );
+
+                $url = admin_url( 'admin-ajax.php' ) . '?action=bsi_import_run_background&token=' . $token;
+
+                wp_remote_post( $url, array(
+                        'timeout'   => 1,
+                        'blocking'  => false,
+                        'sslverify' => false,
+                ) );
+
+                $this->log( 'info', 'Фоновый процесс запущен (non-blocking HTTP)', array() );
+        }
+
+        /**
+         * AJAX: фоновый процесс — работает автономно.
+         */
+        public function ajax_import_run_background() {
+                $token = isset( $_GET['token'] ) ? sanitize_text_field( wp_unslash( $_GET['token'] ) ) : '';
+                $saved_token = get_option( 'bsi_background_token', '' );
+                if ( empty( $token ) || $token !== $saved_token ) {
+                        http_response_code( 403 );
+                        exit( 'Forbidden' );
+                }
+                delete_option( 'bsi_background_token' );
+
+                ignore_user_abort( true );
+                @set_time_limit( 0 );
+                @ini_set( 'memory_limit', '512M' );
+
+                // Закрываем соединение.
+                header( 'Connection: close' );
+                header( 'Content-Length: 0' );
+                header( 'Content-Encoding: none' );
+                while ( ob_get_level() > 0 ) { ob_end_clean(); }
+                ob_start();
+                echo '';
+                ob_end_flush();
+                flush();
+
+                // Авторизуемся.
+                $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
+                if ( ! empty( $admins ) ) {
+                        wp_set_current_user( $admins[0]->ID );
+                }
+                if ( ! defined( 'DOING_AJAX' ) ) {
+                        define( 'DOING_AJAX', true );
+                }
+
+                // Перехват wp_die.
+                remove_all_filters( 'wp_die_handler' );
+                add_filter( 'wp_die_handler', function() {
+                        return function( $m = '', $t = '', $a = array() ) {
+                                throw new Exception( 'batch_done' );
+                        };
+                }, 999 );
+
+                $this->log( 'info', 'Фоновый процесс: начал работу', array(
+                        'max_execution_time' => ini_get( 'max_execution_time' ),
+                ) );
+
+                // ГЛАВНЫЙ ЦИКЛ.
+                $start = microtime( true );
+                $max_sec = 3500; // ~58 мин (если set_time_limit не сработал).
+                for ( $i = 0; $i < 100000; $i++ ) {
+                        $state = $this->get_import_state();
+                        if ( 'running' !== $state['status'] ) {
+                                $this->log( 'info', 'Фоновый процесс: импорт завершён', array(
+                                        'status' => $state['status'],
+                                        'processed' => $state['processed_rows'],
+                                        'total' => $state['total_rows'],
+                                ) );
+                                break;
+                        }
+
+                        if ( ( microtime( true ) - $start ) > $max_sec ) {
+                                // Лимит времени — перезапускаем себя.
+                                $this->log( 'info', 'Фоновый процесс: перезапуск (лимит времени)', array(
+                                        'elapsed' => round( microtime( true ) - $start, 1 ),
+                                        'processed' => $state['processed_rows'],
+                                ) );
+                                $this->spawn_background_process();
+                                break;
+                        }
+
+                        if ( false !== get_transient( 'bsi_background_stop' ) ) {
+                                delete_transient( 'bsi_background_stop' );
+                                $this->log( 'info', 'Фоновый процесс: остановлен пользователем', array() );
+                                break;
+                        }
+
+                        ob_start();
+                        try {
+                                $this->process_batch_core();
+                        } catch ( Exception $e ) {}
+                        ob_end_clean();
+
+                        usleep( 100000 ); // 0.1 сек пауза.
+                }
+
+                $this->log( 'info', 'Фоновый процесс: завершён', array(
+                        'iterations' => $i,
+                        'elapsed' => round( microtime( true ) - $start, 1 ),
+                ) );
+                exit;
         }
 
         /* ---------------------------------------------------------------------

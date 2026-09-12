@@ -686,6 +686,15 @@ class BSI_Importer {
                                 'pending_row'    => null, // хвоста не остаётся.
                         ) );
 
+                        // Применяем тег новинок после завершения импорта.
+                        if ( class_exists( 'BSI_Novelties' ) ) {
+                                BSI_Novelties::instance()->apply_novelties_tag();
+                        }
+
+                        $this->log( 'info', 'Импорт завершён!', array(
+                                'processed' => $state['total_rows'],
+                        ) );
+
                         wp_send_json_success( array(
                                 'message' => __( 'Импорт завершён!', 'beestore-integration' ),
                                 'state'   => $this->get_import_state(),
@@ -765,6 +774,11 @@ class BSI_Importer {
                                 $total_count = isset( $index[ $igu ] ) ? $index[ $igu ] : count( $data['variants'] );
                                 $is_multi_variant = $total_count > 1;
                                 $existing_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu );
+
+                                // Сохраняем сезон ВСЕГДА — даже если товар не изменился.
+                                if ( $existing_id && class_exists( 'BSI_Novelties' ) ) {
+                                        BSI_Novelties::instance()->save_product_season( $existing_id, $data['parent'] );
+                                }
 
                                 // ─── Пропуск неизменённых товаров ──────────────────────
                                 if ( $existing_id && $this->product_unchanged( $existing_id, $data['variants'] ) ) {
@@ -1979,6 +1993,13 @@ class BSI_Importer {
                                 // Если товар уже существует и данные не изменились —
                                 // полностью пропускаем, без каких-либо операций WC.
                                 $existing_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu_articolo );
+
+                                // Сохраняем сезон ВСЕГДА — даже если товар не изменился.
+                                // Нужно для тега новинок.
+                                if ( $existing_id && class_exists( 'BSI_Novelties' ) ) {
+                                        BSI_Novelties::instance()->save_product_season( $existing_id, $data['parent'] );
+                                }
+
                                 if ( $existing_id && $this->product_unchanged( $existing_id, $data['variants'] ) ) {
                                         BSI_Import_Filters::instance()->increment_counters(
                                                 $this->extract_category( $data['parent'] ),

@@ -517,24 +517,26 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => sprintf( __( 'Импорт не запущен (статус: %s)', 'beestore-integration' ), $state['status'] ) ) );
                 }
 
-                // Проверяем lock — если cron или другой процесс уже импортирует,
-                // AJAX не запускает параллельный.
+                // Проверяем lock — если другой процесс обрабатывает.
+                // ВАЖНО: используем current_time('timestamp') для age (lock хранится в time()).
+                // Если lock старый (> 60 сек) — процесс умер, сбрасываем.
                 $lock = get_transient( 'bsi_import_lock' );
                 if ( false !== $lock ) {
                         $lock_age = time() - (int) $lock;
                         $lock_pid = (int) get_transient( 'bsi_import_lock_pid' );
                         $current_pid = function_exists( 'getmypid' ) ? getmypid() : 0;
-                        // Если lock от другого PID и свежий — выходим.
-                        if ( $lock_pid !== $current_pid && $lock_age < 1800 ) {
+                        // Если lock от другого PID и свежий (< 60 сек) — выходим.
+                        if ( $lock_pid !== $current_pid && $lock_age < 60 ) {
                                 wp_send_json_error( array(
                                         'message' => sprintf(
-                                            /* translators: 1: секунды, 2: PID процесса */
-                                            __( 'Импорт уже идёт в другом процессе (%1$d сек, PID %2$d). Подождите или сбросьте lock.', 'beestore-integration' ),
-                                            $lock_age,
-                                            $lock_pid
+                                                __( 'Импорт уже идёт в другом процессе (%1$d сек). Подождите.', 'beestore-integration' ),
+                                                $lock_age
                                         ),
                                 ) );
                         }
+                        // Lock старый (> 60 сек) — процесс умер, сбрасываем.
+                        delete_transient( 'bsi_import_lock' );
+                        delete_transient( 'bsi_import_lock_pid' );
                 }
 
                 if ( empty( $state['csv_file'] ) || ! file_exists( $state['csv_file'] ) ) {

@@ -124,6 +124,9 @@ class BSI_Cron {
                                 BSI_Importer::instance()->process_batch_core();
                         } catch ( Exception $e ) {}
                         ob_end_clean();
+                        // Снимаем lock — чтобы AJAX мог подхватить если вкладку открыли.
+                        delete_transient( 'bsi_import_lock' );
+                        delete_transient( 'bsi_import_lock_pid' );
                         $batches_done++;
                 }
 

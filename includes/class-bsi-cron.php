@@ -48,8 +48,11 @@ class BSI_Cron {
 
                 // Если last_update свежее (< 10 сек назад) — значит AJAX-вкладка
                 // ещё активно обрабатывает. Не вмешиваемся.
+                // ВАЖНО: используем current_time('timestamp') вместо time() —
+                // потому что last_update хранится в WordPress времени (с учётом timezone).
                 $last_update_ts = strtotime( $state['last_update'] );
-                if ( $last_update_ts > 0 && ( time() - $last_update_ts ) < 10 ) {
+                $now_ts = current_time( 'timestamp' );
+                if ( $last_update_ts > 0 && ( $now_ts - $last_update_ts ) < 10 ) {
                         // Вкладка активна — перепланируем и выходим.
                         wp_schedule_single_event( time() + 30, 'bsi_cron_background_batch' );
                         return;

@@ -385,6 +385,16 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
                 }
 
+                $this->process_batch_core();
+        }
+
+        /**
+         * Обработка одного батча — без AJAX проверок (nonce, права).
+         * Используется и AJAX и cron.
+         *
+         * @return array Результат батча.
+         */
+        public function process_batch_core() {
                 $state = $this->get_import_state();
                 if ( 'running' !== $state['status'] ) {
                         wp_send_json_error( array( 'message' => sprintf( __( 'Импорт не запущен (статус: %s)', 'beestore-integration' ), $state['status'] ) ) );

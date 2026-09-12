@@ -162,37 +162,28 @@ class BSI_Cron {
         }
 
         /**
-         * Вызвать ajax_import_process_batch без HTTP — перехватываем wp_die.
+         * Вызвать обработку батча напрямую — без AJAX, без nonce, без wp_die.
          */
         private function call_process_batch_silent() {
-                // Устанавливаем флаг AJAX чтобы wp_send_json работал.
+                // Устанавливаем флаг AJAX чтобы wp_send_json работал (но мы перехватим die).
                 if ( ! defined( 'DOING_AJAX' ) ) {
                         define( 'DOING_AJAX', true );
                 }
 
-                // Создаём nonce и кладём в $_POST — check_ajax_referer проверит его.
-                $current_user_id = get_current_user_id();
-                if ( ! $current_user_id ) {
-                        $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
-                        if ( ! empty( $admins ) ) {
-                                $current_user_id = $admins[0]->ID;
-                                wp_set_current_user( $current_user_id );
-                        }
-                }
-                $_POST['nonce'] = wp_create_nonce( 'bsi_admin_nonce' );
-                $_REQUEST['nonce'] = $_POST['nonce'];
-
-                // Подменяем wp_die_handler чтобы он не убивал процесс.
+                // Подменяем wp_die_handler ОДИН раз — до вызова.
+                // Используем фильтр с высоким приоритетом.
+                remove_all_filters( 'wp_die_handler' );
                 add_filter( 'wp_die_handler', function() {
                         return function( $message = '', $title = '', $args = array() ) {
                                 // Не делаем die() — просто возвращаем управление.
                                 throw new Exception( 'batch_complete' );
                         };
-                } );
+                }, 999 );
 
                 ob_start();
                 try {
-                        BSI_Importer::instance()->ajax_import_process_batch();
+                        // Вызываем process_batch_core напрямую — без check_ajax_referer.
+                        BSI_Importer::instance()->process_batch_core();
                 } catch ( Exception $e ) {
                         // Нормальное завершение через wp_die от wp_send_json.
                 }
@@ -202,9 +193,10 @@ class BSI_Cron {
                 if ( $output ) {
                         $json = json_decode( $output, true );
                         if ( is_array( $json ) && isset( $json['data'] ) ) {
-                                BSI_Logger::instance()->debug( 'cron', 'Фоновый батч обработан', array(
+                                BSI_Logger::instance()->info( 'cron', 'Фоновый батч обработан', array(
                                         'message'   => isset( $json['data']['message'] ) ? $json['data']['message'] : '',
                                         'processed' => isset( $json['data']['state']['processed_rows'] ) ? $json['data']['state']['processed_rows'] : 0,
+                                        'total'     => isset( $json['data']['state']['total_rows'] ) ? $json['data']['state']['total_rows'] : 0,
                                 ) );
                         }
                 }

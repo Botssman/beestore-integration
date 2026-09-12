@@ -24,11 +24,14 @@ $percent = $state['total_rows'] > 0
 // Проверяем: идёт ли импорт в ДРУГОЙ вкладке (свежий last_update).
 // Если last_update было > 60 сек назад — значит предыдущая вкладка закрылась,
 // и эта вкладка должна подхватить импорт (запустить startBatchLoop).
+// ВАЖНО: используем current_time('timestamp') вместо time() —
+// потому что last_update хранится в WordPress времени (с учётом timezone).
 $import_is_stale = false;
 if ( 'running' === $state['status'] && ! empty( $state['last_update'] ) ) {
         $last_ts = strtotime( $state['last_update'] );
         if ( $last_ts > 0 ) {
-                $import_is_stale = ( time() - $last_ts ) > 60;
+                $now_ts = current_time( 'timestamp' );
+                $import_is_stale = ( $now_ts - $last_ts ) > 60;
         }
 }
 
@@ -201,7 +204,7 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                                         <?php esc_html_e( 'Остановить и сбросить', 'beestore-integration' ); ?>
                                 </button>
                         </p>
-			<!-- Лог в реальном времени --><!-- Лог в реальном времени -->
+                        <!-- Лог в реальном времени --><!-- Лог в реальном времени -->
                         <div id="bsi-realtime-log" style="margin-top:15px;display:none;">
                                 <h4><?php esc_html_e( 'Лог в реальном времени:', 'beestore-integration' ); ?></h4>
                                 <pre class="bsi-log-output" style="max-height:200px;overflow:auto;background:#1e1e1e;color:#0f0;padding:10px;border-radius:4px;font-size:11px;"></pre>

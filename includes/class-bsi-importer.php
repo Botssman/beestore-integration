@@ -449,7 +449,9 @@ class BSI_Importer {
 
                 // ГЛАВНЫЙ ЦИКЛ.
                 $start = microtime( true );
-                $max_sec = 3500; // ~58 мин (если set_time_limit не сработал).
+                // ВАЖНО: 25 сек — хостинг убивает через 30 сек (max_execution_time).
+                // Перезапуск создаёт цепочку: 25сек → новый процесс → 25сек → ...
+                $max_sec = 25;
                 for ( $i = 0; $i < 100000; $i++ ) {
                         $state = $this->get_import_state();
                         if ( 'running' !== $state['status'] ) {

@@ -36,7 +36,7 @@ class BSI_Cron {
 
         /**
          * Фоновый батч: обрабатывает батчи импорта напрямую, планирует следующий запуск.
-         * Не зависит от вкладки браузера — работает через WP-Cron.
+         * Работает через системный cron → wp-cron.php → bsi_cron_background_batch.
          */
         public function process_background_batch() {
                 $state = BSI_Importer::instance()->get_import_state();
@@ -46,22 +46,23 @@ class BSI_Cron {
                         return;
                 }
 
-                // Если last_update свежее (< 30 сек назад) — значит AJAX-вкладка
+                // Если last_update свежее (< 10 сек назад) — значит AJAX-вкладка
                 // ещё активно обрабатывает. Не вмешиваемся.
                 $last_update_ts = strtotime( $state['last_update'] );
-                if ( $last_update_ts > 0 && ( time() - $last_update_ts ) < 30 ) {
-                        wp_schedule_single_event( time() + 120, 'bsi_cron_background_batch' );
+                if ( $last_update_ts > 0 && ( time() - $last_update_ts ) < 10 ) {
+                        // Вкладка активна — перепланируем и выходим.
+                        wp_schedule_single_event( time() + 30, 'bsi_cron_background_batch' );
                         return;
                 }
 
-                // Вкладка закрылась — подхватываем импорт напрямую.
-                BSI_Logger::instance()->info( 'cron', 'Фоновый батч: подхватываем импорт напрямую', array(
+                // Вкладка закрылась — подхватываем импорт.
+                BSI_Logger::instance()->info( 'cron', 'Фоновый батч: подхватываем импорт', array(
                         'last_update' => $state['last_update'],
                         'processed'   => $state['processed_rows'],
                         'total'       => $state['total_rows'],
                 ) );
 
-                // Авторизуемся как админ — нужно для wp_create_nonce и check_ajax_referer.
+                // Авторизуемся как админ.
                 if ( ! function_exists( 'get_current_user_id' ) || ! get_current_user_id() ) {
                         $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
                         if ( ! empty( $admins ) ) {
@@ -69,24 +70,39 @@ class BSI_Cron {
                         }
                 }
 
-                // Обрабатываем до 10 батчей за запуск (каждый ~25 строк = ~250 строк).
-                // Напрямую вызываем логику, без HTTP запросов.
-                $max_batches = 10;
-                $max_seconds = 50; // Лимит времени для cron (WP-Cron обычно 60 сек).
-                $start_time = microtime( true );
+                // Устанавливаем DOING_AJAX для wp_send_json.
+                if ( ! defined( 'DOING_AJAX' ) ) {
+                        define( 'DOING_AJAX', true );
+                }
 
-                for ( $i = 0; $i < $max_batches; $i++ ) {
+                // Перехват wp_die — чтобы wp_send_json не убивал процесс.
+                remove_all_filters( 'wp_die_handler' );
+                add_filter( 'wp_die_handler', function() {
+                        return function( $m = '', $t = '', $a = array() ) {
+                                throw new Exception( 'batch_done' );
+                        };
+                }, 999 );
+
+                // Снимаем import_lock если он от старого процесса.
+                $lock_pid = (int) get_transient( 'bsi_import_lock_pid' );
+                $current_pid = function_exists( 'getmypid' ) ? getmypid() : 0;
+                if ( $lock_pid && $lock_pid !== $current_pid ) {
+                        delete_transient( 'bsi_import_lock' );
+                        delete_transient( 'bsi_import_lock_pid' );
+                }
+
+                // Обрабатываем КАК МОЖНО БОЛЬШЕ батчей за один запуск cron.
+                // Системный cron каждые 5 минут → каждый запуск ~50 секунд.
+                $max_seconds = 25; // 25 сек (хостинг убивает через 30).
+                $start_time = microtime( true );
+                $batches_done = 0;
+
+                while ( true ) {
                         // Проверяем лимит времени.
-                        if ( ( microtime( true ) - $start_time ) > $max_seconds ) {
-                                BSI_Logger::instance()->info( 'cron', 'Фоновый батч: достигнут лимит времени', array(
-                                        'batches_done' => $i,
-                                        'elapsed'      => round( microtime( true ) - $start_time, 1 ),
-                                ) );
+                        $elapsed = microtime( true ) - $start_time;
+                        if ( $elapsed > $max_seconds ) {
                                 break;
                         }
-
-                        // Обрабатываем один батч напрямую.
-                        $this->process_single_batch_direct();
 
                         // Проверяем статус.
                         $state = BSI_Importer::instance()->get_import_state();
@@ -96,17 +112,26 @@ class BSI_Cron {
                                         'processed' => $state['processed_rows'],
                                         'total'     => $state['total_rows'],
                                 ) );
-                                return; // Не планируем следующий — импорт завершён.
+                                return; // Не планируем следующий.
                         }
+
+                        // Обрабатываем один батч.
+                        ob_start();
+                        try {
+                                BSI_Importer::instance()->process_batch_core();
+                        } catch ( Exception $e ) {}
+                        ob_end_clean();
+                        $batches_done++;
                 }
 
-                // Планируем следующий фоновый батч.
-                wp_schedule_single_event( time() + 60, 'bsi_cron_background_batch' );
+                // Планируем следующий запуск — через 10 сек.
+                wp_schedule_single_event( time() + 10, 'bsi_cron_background_batch' );
 
-                BSI_Logger::instance()->info( 'cron', 'Фоновый батч: запланирован следующий', array(
-                        'batches_done' => $i,
-                        'processed'    => $state['processed_rows'],
-                        'total'        => $state['total_rows'],
+                BSI_Logger::instance()->info( 'cron', 'Фоновый батч: завершён, запланирован следующий', array(
+                        'batches_done' => $batches_done,
+                        'elapsed'      => round( microtime( true ) - $start_time, 1 ),
+                        'processed'    => BSI_Importer::instance()->get_import_state()['processed_rows'],
+                        'total'        => BSI_Importer::instance()->get_import_state()['total_rows'],
                 ) );
         }
 

@@ -360,13 +360,11 @@ class BSI_Importer {
                 update_option( 'bsi_last_import_zip', $remote_name );
                 update_option( 'bsi_last_import_started', current_time( 'mysql' ) );
 
-                // Планируем фоновую обработку через WP-Cron (как запасной вариант).
-                $next = time() + 120;
+                // Планируем фоновую обработку через WP-Cron.
+                // Системный cron (настроен в cPanel) запускает wp-cron.php каждые 5 минут.
+                // WP-Cron запускает bsi_cron_background_batch который обрабатывает батчи.
+                $next = time() + 10; // Через 10 секунд (не 120 — раньше подхватит)
                 wp_schedule_single_event( $next, 'bsi_cron_background_batch' );
-
-                // ЗАПУСКАЕМ НАСТОЯЩИЙ ФОНОВЫЙ ПРОЦЕСС — не зависит от посещений!
-                // PHP процесс продолжит работать даже после закрытия вкладки.
-                $this->spawn_background_process();
 
                 $this->log( 'info', 'Старт импорта (новая система с прогрессом)', array(
                         'file'        => $remote_name,

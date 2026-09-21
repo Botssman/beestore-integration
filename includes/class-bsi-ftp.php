@@ -277,7 +277,11 @@ class BSI_FTP {
                         wp_mkdir_p( $dest_dir );
                 }
                 $base_name = basename( $zip_file );
-                $target    = trailingslashit( $dest_dir ) . $base_name;
+                // #9 ФИКС: приводим имя к ВЕРХНЕМУ регистру — на FTP имена COMPANY_...,
+                // а WordPress при скачивании делает company_... в нижнем регистре.
+                // Без этого glob('COMPANY_*') не находит файлы в нижнем регистре.
+                $base_name_upper = strtoupper( $base_name );
+                $target = trailingslashit( $dest_dir ) . $base_name_upper;
                 if ( file_exists( $zip_file ) ) {
                         @rename( $zip_file, $target ); // phpcs:ignore
                 } else {
@@ -468,8 +472,9 @@ class BSI_FTP {
                 }
 
                 // Проверим — не обработан ли уже этот файл.
-                $processed_marker = trailingslashit( $processed_dir ) . sanitize_file_name( $target['name'] );
-                if ( file_exists( $processed_marker ) ) {
+                $processed_marker_upper = trailingslashit( $processed_dir ) . strtoupper( sanitize_file_name( $target['name'] ) );
+			$processed_marker_lower = trailingslashit( $processed_dir ) . strtolower( sanitize_file_name( $target['name'] ) );
+                if ( file_exists( $processed_marker_upper ) || file_exists( $processed_marker_lower ) ) {
                         return new WP_Error(
                                 'bsi_already_processed',
                                 sprintf( __( 'Файл %s уже обработан ранее.', 'beestore-integration' ), $target['name'] )

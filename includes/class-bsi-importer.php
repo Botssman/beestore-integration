@@ -588,8 +588,13 @@ class BSI_Importer {
 
                                 // ─── Пропуск неизменённых товаров ──────────────────────
                                 if ( $existing_id && $this->product_unchanged( $existing_id, $data['variants'] ) ) {
-                                        // Даже если данные не изменились — проверим статус по наличию
-                                        // картинок В CSV (нет ни одного URLImg → черновик).
+                                        // КРИТИЧНО: обновляем _bsi_last_seen даже для пропущенных товаров.
+                                        update_post_meta( $existing_id, '_bsi_last_seen', current_time( 'mysql' ) );
+                                        // Сохраняем сезон.
+                                        if ( class_exists( 'BSI_Novelties' ) ) {
+                                                BSI_Novelties::instance()->save_product_season( $existing_id, $data['parent'] );
+                                        }
+                                        // Проверим статус по картинкам.
                                         $this->sync_visibility_by_images( $existing_id, $data['variants'] );
                                         $batch_skipped++;
                                         BSI_Import_Filters::instance()->increment_counters( $category, $brand );
@@ -1856,6 +1861,15 @@ class BSI_Importer {
                                 $map[ $sku ] = $this->compute_variant_hash( $row );
                         }
                         update_post_meta( $product_id, '_bsi_data_hash', $map );
+
+                        // КРИТИЧНО: записываем _bsi_last_seen — иначе deactivate_unseen_products()
+                        // скроет ВСЕ товары (бомба замедленного действия, п.4 из аудита).
+                        update_post_meta( $product_id, '_bsi_last_seen', current_time( 'mysql' ) );
+
+                        // Сохраняем сезон (для тега новинок).
+                        if ( class_exists( 'BSI_Novelties' ) ) {
+                                BSI_Novelties::instance()->save_product_season( $product_id, $parent_row );
+                        }
                 }
 
                 return $product_id;

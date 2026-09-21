@@ -42,8 +42,8 @@ class BSI_Installer {
                                 'igu_valuta'         => '15\\1\\1\\1',
                                 'cod_dest_sdi'       => '',
                                 'id_tipo_incasso_default' => 3,
-                                'enable_order_sync'  => '1',
-                                'enable_status_sync' => '1',
+                                'enable_order_sync'  => '0',  // #22 ФИКС: отключено по умолчанию — заказы не должны идти в BeeStore.
+                                'enable_status_sync' => '0',  // #22 ФИКС: отключено по умолчанию.
                                 'enable_realtime_stock' => '0',
                                 'sync_frequency'     => 'every15min',
                                 'status_sync_frequency' => 'hourly',

@@ -100,7 +100,7 @@ class BSI_Novelties {
                                 return $pb['year'] - $pa['year'];
                         }
                         // Тот же год — сравниваем сезон (S > W > PI > другие).
-                        $order = array( 'S' => 4, 'W' => 3, 'PI' => 2, 'PE' => 1 );
+                        $order = array( 'W' => 4, 'S' => 3, 'PI' => 2, 'PE' => 1 );
                         $oa = isset( $order[ $pa['season'] ] ) ? $order[ $pa['season'] ] : 0;
                         $ob = isset( $order[ $pb['season'] ] ) ? $order[ $pb['season'] ] : 0;
                         return $ob - $oa;
@@ -208,7 +208,7 @@ class BSI_Novelties {
 
                 $tag_id = $this->get_tag_id();
                 if ( ! $tag_id ) {
-                        BSI_Logger::instance()->warning( 'novelties', 'Не удалось создать/найти тег новинок', array(
+                        BSI_Logger::instance()->warn( 'novelties', 'Не удалось создать/найти тег новинок', array(
                                 'slug' => self::TAG_SLUG,
                         ) );
                         return;

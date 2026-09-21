@@ -10,6 +10,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 $settings = get_option( 'bsi_settings', array() );
+
+// Базовый URL — если мы внутри dev-zone, используем его.
+// Если прямая страница — используем catalog-browser.
+$base_page = isset( $_GET['devtab'] ) ? 'bsi-dev-zone&devtab=catalog' : 'bsi-catalog-browser';
 ?>
 <div class="wrap">
 	<h1><?php echo esc_html__( 'Каталог с FTP Sirio', 'beestore-integration' ); ?></h1>
@@ -49,11 +53,11 @@ $settings = get_option( 'bsi_settings', array() );
 							$name = basename( $local_file );
 							$size = size_format( filesize( $local_file ) );
 							$download_url = wp_nonce_url(
-								admin_url( 'admin.php?page=bsi-catalog-browser&bsi_action=download&file=' . rawurlencode( $name ) ),
+								admin_url( 'admin.php?page=' . $base_page . '&bsi_action=download&file=' . rawurlencode( $name ) ),
 								'bsi_download_file'
 							);
 							$delete_url = wp_nonce_url(
-								admin_url( 'admin.php?page=bsi-catalog-browser&bsi_action=delete_local&file=' . rawurlencode( $name ) ),
+								admin_url( 'admin.php?page=' . $base_page . '&bsi_action=delete_local&file=' . rawurlencode( $name ) ),
 								'bsi_delete_local'
 							);
 							?>
@@ -121,7 +125,7 @@ $settings = get_option( 'bsi_settings', array() );
 						<?php foreach ( $remote_parsed as $f ) : ?>
 							<?php
 							$fetch_url = wp_nonce_url(
-								admin_url( 'admin.php?page=bsi-catalog-browser&bsi_action=fetch&file=' . rawurlencode( $f['remote_path'] ) ),
+								admin_url( 'admin.php?page=' . $base_page . '&bsi_action=fetch&file=' . rawurlencode( $f['remote_path'] ) ),
 								'bsi_fetch_file'
 							);
 							?>

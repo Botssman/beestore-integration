@@ -141,92 +141,6 @@ class BSI_Translations {
         private function __construct() {
                 // AJAX для сохранения переводов.
                 add_action( 'wp_ajax_bsi_save_translations', array( $this, 'ajax_save_translations' ) );
-                // AJAX для слияния дублей категорий (slug -2, -3, ...).
-                add_action( 'wp_ajax_bsi_merge_duplicate_terms', array( $this, 'ajax_merge_duplicate_terms' ) );
-        }
-
-        /**
-         * AJAX: слить дубли категорий.
-         * Находит термы с slug оканчивающимся на -N (N=число).
-         * Переносит товары в оригинальный терм (без -N) и удаляет дубль.
-         */
-        public function ajax_merge_duplicate_terms() {
-                check_ajax_referer( 'bsi_admin_nonce', 'nonce' );
-                if ( ! current_user_can( 'manage_options' ) ) {
-                        wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
-                }
-
-                $taxonomy = isset( $_POST['taxonomy'] ) ? sanitize_text_field( wp_unslash( $_POST['taxonomy'] ) ) : 'product_cat';
-                if ( ! taxonomy_exists( $taxonomy ) ) {
-                        wp_send_json_error( array( 'message' => 'Таксономия не существует.' ) );
-                }
-
-                $terms = get_terms( array(
-                        'taxonomy'   => $taxonomy,
-                        'hide_empty' => false,
-                        'number'     => 0,
-                ) );
-
-                if ( is_wp_error( $terms ) ) {
-                        wp_send_json_error( array( 'message' => $terms->get_error_message() ) );
-                }
-
-                $merged = 0;
-                $failed = 0;
-                $errors = array();
-
-                foreach ( $terms as $term ) {
-                        // Ищем термы с slug оканчивающимся на -N (N = число).
-                        if ( ! preg_match( '/^(.+)-(\d+)$/', $term->slug, $m ) ) {
-                                continue;
-                        }
-
-                        $base_slug = $m[1];
-
-                        // Ищем оригинальный терм (без -N).
-                        $original = get_term_by( 'slug', $base_slug, $taxonomy );
-                        if ( ! $original || is_wp_error( $original ) ) {
-                                // Оригинал не найден — просто переименуем slug (убираем -N).
-                                wp_update_term( $term->term_id, $taxonomy, array( 'slug' => $base_slug ) );
-                                $merged++;
-                                continue;
-                        }
-
-                        // Переносим товары из дубля в оригинал.
-                        $products = get_objects_in_term( $term->term_id, $taxonomy );
-                        if ( is_array( $products ) && ! empty( $products ) ) {
-                                foreach ( $products as $product_id ) {
-                                        wp_set_post_terms( $product_id, array( $original->term_id ), $taxonomy, true );
-                                }
-                        }
-
-                        // Удаляем дубль.
-                        $result = wp_delete_term( $term->term_id, $taxonomy );
-                        if ( is_wp_error( $result ) ) {
-                                $failed++;
-                                $errors[] = $term->name . ': ' . $result->get_error_message();
-                        } else {
-                                $merged++;
-                        }
-                }
-
-                BSI_Logger::instance()->info( 'translations', 'Слияние дублей категорий', array(
-                        'taxonomy' => $taxonomy,
-                        'merged'   => $merged,
-                        'failed'   => $failed,
-                ) );
-
-                wp_send_json_success( array(
-                        'merged' => $merged,
-                        'failed' => $failed,
-                        'errors' => $errors,
-                        'message' => sprintf(
-                                /* translators: 1: слито, 2: ошибок */
-                                __( 'Слито дублей: %1$d, ошибок: %2$d', 'beestore-integration' ),
-                                $merged,
-                                $failed
-                        ),
-                ) );
         }
 
         /**
@@ -442,100 +356,13 @@ class BSI_Translations {
 
                 $result = array();
                 foreach ( $terms as $term ) {
-                        // Получаем оригинальное имя из meta (если есть).
-                        $original_name = get_term_meta( $term->term_id, '_bsi_original_name', true );
-
-                        // ВАЖНО: если meta содержит русские буквы — она сохранена с багом
-                        // (предыдущие версии сохраняли русское имя вместо английского).
-                        // Удаляем её и делаем reverse lookup заново.
-                        if ( ! empty( $original_name ) && preg_match( '/[а-яё]/i', $original_name ) ) {
-                                delete_term_meta( $term->term_id, '_bsi_original_name' );
-                                $original_name = '';
-                        }
-
-                        // Если meta нет — reverse lookup по сохранённым переводам.
-                        // НО: если найденный оригинал содержит русские буквы — пропускаем
-                        // (переводы могли сохраниться с русским ключом, это баг).
-                        if ( empty( $original_name ) ) {
-                                $saved = $this->get_translations( $taxonomy );
-                                foreach ( $saved as $orig => $ru ) {
-                                        if ( 0 === strcasecmp( $ru, $term->name ) ) {
-                                                // Проверяем что найденный оригинал — английский.
-                                                if ( ! preg_match( '/[а-яё]/i', $orig ) ) {
-                                                        $original_name = $orig;
-                                                        break;
-                                                }
-                                        }
-                                }
-                        }
-
-                        // Если и так не нашли — reverse lookup по встроенному словарю.
-                        if ( empty( $original_name ) ) {
-                                $default_dict = $this->get_default_dict( $taxonomy );
-                                if ( $default_dict ) {
-                                        foreach ( $default_dict as $orig => $ru ) {
-                                                if ( 0 === strcasecmp( $ru, $term->name ) ) {
-                                                        $original_name = $orig;
-                                                        update_term_meta( $term->term_id, '_bsi_original_name', $orig );
-                                                        break;
-                                                }
-                                        }
-                                        // Если не нашли по имени — ищем по slug.
-                                        if ( empty( $original_name ) && ! empty( $term->slug ) ) {
-                                                foreach ( $default_dict as $orig => $ru ) {
-                                                        if ( 0 === strcasecmp( str_replace( array( '-', ' ' ), '_', $orig ), str_replace( array( '-', ' ' ), '_', $term->slug ) ) ) {
-                                                                $original_name = $orig;
-                                                                update_term_meta( $term->term_id, '_bsi_original_name', $orig );
-                                                                break;
-                                                        }
-                                                }
-                                        }
-                                }
-                        }
-
-                        // Если всё ещё не нашли — пробуем по slug без словаря.
-                        // slug обычно = оригинал в нижнем регистре с заменой пробелов на дефисы.
-                        if ( empty( $original_name ) && ! empty( $term->slug ) ) {
-                                // Убираем суффикс дубля: "beauty-accessories-2" → "beauty-accessories".
-                                $clean_slug = preg_replace( '/-\d+$/', '', $term->slug );
-
-                                // Если slug не содержит русских букв — это английский оригинал.
-                                if ( ! preg_match( '/[а-яё]/i', $clean_slug ) ) {
-                                        $original_name = strtoupper( str_replace( '-', ' ', $clean_slug ) );
-                                        update_term_meta( $term->term_id, '_bsi_original_name', $original_name );
-                                }
-                        }
-
-                        // Если и так не нашли — оригинал = текущее имя.
-                        if ( empty( $original_name ) ) {
-                                $original_name = $term->name;
-                        }
-
-                        $result[ $original_name ] = array(
-                                'term_id'       => $term->term_id,
-                                'slug'          => $term->slug,
-                                'count'         => $term->count,
-                                'current_name'  => $term->name,
-                                'original_name' => $original_name,
+                        $result[ $term->name ] = array(
+                                'term_id'    => $term->term_id,
+                                'slug'       => $term->slug,
+                                'count'      => $term->count,
+                                'current_name' => $term->name,
                         );
                 }
                 return $result;
         }
-        /**
-         * Получить встроенный словарь переводов для таксономии.
-         * Используется для reverse lookup: по русскому имени найти английский оригинал.
-         *
-         * @param string $taxonomy
-         * @return array|false
-         */
-        public function get_default_dict( $taxonomy ) {
-                if ( 'product_cat' === $taxonomy ) {
-                        return self::DEFAULT_TRANSLATIONS_PRODUCT_CAT;
-                }
-                if ( 'pa_sesso' === $taxonomy ) {
-                        return self::DEFAULT_TRANSLATIONS_PA_SESSO;
-                }
-                return false;
-        }
-
 }

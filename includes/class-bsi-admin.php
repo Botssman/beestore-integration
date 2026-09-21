@@ -26,10 +26,7 @@ class BSI_Admin {
         }
 
         public function register_submenus() {
-                // Основные разделы для всех менеджеров магазина.
                 $cap = 'manage_woocommerce';
-                // Разделы только для администраторов (управление настройками, FTP, логи, диагностика).
-                $admin_cap = 'manage_options';
 
                 add_submenu_page(
                         'beestore-integration',
@@ -51,6 +48,15 @@ class BSI_Admin {
 
                 add_submenu_page(
                         'beestore-integration',
+                        __( 'Каталог с FTP', 'beestore-integration' ),
+                        __( 'Каталог с FTP', 'beestore-integration' ),
+                        $cap,
+                        'bsi-catalog-browser',
+                        array( $this, 'render_catalog_browser_page' )
+                );
+
+                add_submenu_page(
+                        'beestore-integration',
                         __( 'Переводы', 'beestore-integration' ),
                         __( 'Переводы', 'beestore-integration' ),
                         $cap,
@@ -67,21 +73,33 @@ class BSI_Admin {
                         array( $this, 'render_filters_page' )
                 );
 
-                // ⚠ РАЗДЕЛЫ ДЛЯ РАЗРАБОТЧИКА — НЕ видны в главном меню.
-                // Все эти страницы (Настройки, Каталог с FTP, Логи, Диагностика,
-                // Опасные операции) доступны только внутри вкладки «⚠ Для разработчика»
-                // через парольную защиту.
-                //
-                // ВАЖНО: они регистрируются как hidden subpages (без видимого пункта меню)
-                // через add_submenu_page с parent_slug = null — НЕ будут видны в навигации,
-                // но к ним можно обращаться напрямую из шаблона dev-zone-page.php.
+                add_submenu_page(
+                        'beestore-integration',
+                        __( 'Логи', 'beestore-integration' ),
+                        __( 'Логи', 'beestore-integration' ),
+                        $cap,
+                        'bsi-logs',
+                        array( $this, 'render_logs_page' )
+                );
 
-                // ⚠ Для разработчика (главная страница с паролем).
+                add_submenu_page(
+                        'beestore-integration',
+                        __( 'Диагностика', 'beestore-integration' ),
+                        __( 'Диагностика', 'beestore-integration' ),
+                        $cap,
+                        'bsi-diagnostics',
+                        array( $this, 'render_diagnostics_page' )
+                );
+
+                // ⚠ Опасная зона — только для разработчика.
+                // Доступ: capability 'manage_options' + дополнительный пароль
+                // (хранится в опции bsi_dev_zone_password, по умолчанию 'beestore-dev').
+                // Пароль можно сменить на этой же странице.
                 add_submenu_page(
                         'beestore-integration',
                         __( '⚠ Для разработчика', 'beestore-integration' ),
                         __( '⚠ Для разработчика', 'beestore-integration' ),
-                        $admin_cap,
+                        'manage_options',
                         'bsi-dev-zone',
                         array( $this, 'render_dev_zone_page' )
                 );

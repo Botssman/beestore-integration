@@ -21,20 +21,6 @@ $percent = $state['total_rows'] > 0
         ? round( ( $state['processed_rows'] / $state['total_rows'] ) * 100, 1 )
         : 0;
 
-// Проверяем: идёт ли импорт в ДРУГОЙ вкладке (свежий last_update).
-// Если last_update было > 60 сек назад — значит предыдущая вкладка закрылась,
-// и эта вкладка должна подхватить импорт (запустить startBatchLoop).
-// ВАЖНО: используем current_time('timestamp') вместо time() —
-// потому что last_update хранится в WordPress времени (с учётом timezone).
-$import_is_stale = false;
-if ( 'running' === $state['status'] && ! empty( $state['last_update'] ) ) {
-        $last_ts = strtotime( $state['last_update'] );
-        if ( $last_ts > 0 ) {
-                $now_ts = current_time( 'timestamp' );
-                $import_is_stale = ( $now_ts - $last_ts ) > 60;
-        }
-}
-
 // Статус на русском.
 $status_labels = array(
         'idle'      => __( 'Нет активного импорта', 'beestore-integration' ),
@@ -159,12 +145,6 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                                         <th><?php esc_html_e( 'Отфильтровано (вне фильтров):', 'beestore-integration' ); ?></th>
                                         <td id="bsi-filtered-products"><?php echo esc_html( number_format_i18n( $state['filtered_products'] ) ); ?></td>
                                 </tr>
-                                        <tr>
-                                                <th>Снято с публикации (отсутствуют в выгрузке):</th>
-                                                <td id="bsi-deactivated-products" style="color:#b88000;font-weight:600;">
-                                                        0
-                                                </td>
-                                        </tr>
                                 <tr>
                                         <th><?php esc_html_e( 'Ошибок:', 'beestore-integration' ); ?></th>
                                         <td>
@@ -204,7 +184,8 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                                         <?php esc_html_e( 'Остановить и сбросить', 'beestore-integration' ); ?>
                                 </button>
                         </p>
-                        <!-- Лог в реальном времени --><!-- Лог в реальном времени -->
+
+                        <!-- Лог в реальном времени -->
                         <div id="bsi-realtime-log" style="margin-top:15px;display:none;">
                                 <h4><?php esc_html_e( 'Лог в реальном времени:', 'beestore-integration' ); ?></h4>
                                 <pre class="bsi-log-output" style="max-height:200px;overflow:auto;background:#1e1e1e;color:#0f0;padding:10px;border-radius:4px;font-size:11px;"></pre>
@@ -318,6 +299,32 @@ $status_color = isset( $status_colors[ $state['status'] ] ) ? $status_colors[ $s
                 </div>
         </div>
 
+        <!-- Все опасные инструменты перенесены в "Для разработчика" -->
+        <div class="bsi-card" style="border-color:#f57c00;background:#fffaf3;">
+                <h2 style="color:#f57c00;">
+                        <span class="dashicons dashicons-shield"></span>
+                        <?php esc_html_e( '⚠ Опасные инструменты → перенесены в «Для разработчика»', 'beestore-integration' ); ?>
+                </h2>
+                <p>
+                        <?php esc_html_e( 'Все опасные операции (удаление товаров, атрибутов, картинок, очистка диска) перенесены в отдельную вкладку с парольной защитой.', 'beestore-integration' ); ?>
+                </p>
+                <ul style="list-style:disc;padding-left:20px;color:#666;">
+                        <li><?php esc_html_e( 'Удалить все товары и атрибуты BeeStore', 'beestore-integration' ); ?></li>
+                        <li><?php esc_html_e( 'Удалить все картинки BeeStore', 'beestore-integration' ); ?></li>
+                        <li><?php esc_html_e( 'Удалить только дубликаты картинок', 'beestore-integration' ); ?></li>
+                        <li><?php esc_html_e( 'Очистка диска: дубликаты файлов (-1, -2, -3)', 'beestore-integration' ); ?></li>
+                        <li><?php esc_html_e( 'Удаление orphan миниатюр WordPress', 'beestore-integration' ); ?></li>
+                </ul>
+                <p>
+                        <a href="<?php echo esc_url( admin_url( 'admin.php?page=bsi-dev-zone' ) ); ?>" class="button button-primary">
+                                <span class="dashicons dashicons-shield"></span>
+                                <?php esc_html_e( 'Перейти в «⚠ Для разработчика»', 'beestore-integration' ); ?>
+                        </a>
+                </p>
+                <p style="margin-bottom:0;color:#666;font-size:12px;">
+                        <?php esc_html_e( 'Доступ: только администраторы + дополнительный пароль. Пароль по умолчанию: beestore-dev (смените после первого входа).', 'beestore-integration' ); ?>
+                </p>
+        </div>
 
         <!-- Последний импорт -->
         <div class="bsi-card">
@@ -362,17 +369,8 @@ jQuery(document).ready(function($){
                 updateUI(state, <?php echo $percent; ?>);
 
                 if (state.status === 'running') {
-                        // Проверяем (через PHP) — свежий ли last_update.
-                        // Если > 60 сек назад — предыдущая вкладка закрылась, подхватываем.
-                        // Если < 60 сек — импорт идёт в другой вкладке, только наблюдаем.
-                        // В обоих случаях запускаем polling — чтобы видеть актуальный статус.
-                        var isStale = <?php echo $import_is_stale ? 'true' : 'false'; ?>;
-
+                        startBatchLoop();
                         startPolling();
-                        if (isStale) {
-                                // Предыдущая вкладка закрылась — подхватываем импорт.
-                                startBatchLoop();
-                        }
                 }
         }
 
@@ -421,7 +419,6 @@ jQuery(document).ready(function($){
                 $('#bsi-updated-products').text(state.updated_products.toLocaleString('ru-RU'));
                 $('#bsi-skipped-products').text((state.skipped_products || 0).toLocaleString('ru-RU'));
                 $('#bsi-filtered-products').text((state.filtered_products || 0).toLocaleString('ru-RU'));
-                $('#bsi-deactivated-products').text((state.deactivated_products || 0).toLocaleString('ru-RU'));
                 $('#bsi-errors-count').text(state.errors_count.toLocaleString('ru-RU'));
                 $('#bsi-errors-count').css('color', state.errors_count > 0 ? '#c62828' : '#666');
                 if (state.last_error) {

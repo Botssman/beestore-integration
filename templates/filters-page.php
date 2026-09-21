@@ -12,7 +12,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 $mode          = $filters['mode'];
 $filter_cats   = $filters['categories'];
 $filter_brands = $filters['brands'];
-$filter_genders = isset( $filters['genders'] ) ? $filters['genders'] : array();
 
 $webp_enabled  = isset( $settings['webp_enabled'] ) && '1' === $settings['webp_enabled'] ? true : false;
 $webp_strategy = isset( $settings['webp_strategy'] ) ? $settings['webp_strategy'] : 3;
@@ -22,12 +21,10 @@ $webp_supports = BSI_WebP::instance()->server_supports();
 $scan_macro  = isset( $scan['macro'] ) ? $scan['macro'] : array();
 $scan_sub    = isset( $scan['sub'] ) ? $scan['sub'] : array();
 $scan_brands = isset( $scan['brands'] ) ? $scan['brands'] : array();
-$scan_genders = isset( $scan['genders'] ) ? $scan['genders'] : array();
 ksort( $scan_macro );
 ksort( $scan_sub );
 ksort( $scan_brands );
-ksort( $scan_genders );
-$has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_genders );
+$has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands );
 ?>
 
 <div class="wrap">
@@ -85,43 +82,6 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_
                                 </table>
                         </div>
 
-                                                <!-- Вкладки фильтров -->
-                        <h2 class="bsi-filter-tabs" style="margin:15px 0 20px;border-bottom:1px solid #c3c4c7;">
-                                <a href="#" class="bsi-filter-tab bsi-filter-tab-active" data-tab="macro">
-                                        <span class="dashicons dashicons-category" style="vertical-align:middle;margin-right:4px;"></span>
-                                        Макро-категории (<?php echo esc_html( count( $scan_macro ) ); ?>)
-                                </a>
-                                <a href="#" class="bsi-filter-tab" data-tab="sub">
-                                        <span class="dashicons dashicons-categories" style="vertical-align:middle;margin-right:4px;"></span>
-                                        Подкатегории (<?php echo esc_html( count( $scan_sub ) ); ?>)
-                                </a>
-                                <a href="#" class="bsi-filter-tab" data-tab="brands">
-                                        <span class="dashicons dashicons-store" style="vertical-align:middle;margin-right:4px;"></span>
-                                        Бренды (<?php echo esc_html( count( $scan_brands ) ); ?>)
-                                </a>
-                                <a href="#" class="bsi-filter-tab" data-tab="gender">
-                                        <span class="dashicons dashicons-groups" style="vertical-align:middle;margin-right:4px;"></span>
-                                        Пол (<?php echo esc_html( count( $scan_genders ) ); ?>)
-                                </a>
-                        </h2>
-
-                        <style>
-                        .bsi-filter-tabs { display:flex; gap:2px; flex-wrap:wrap; }
-                        .bsi-filter-tab {
-                                display:inline-block; padding:8px 14px; margin:0 1px -1px 0;
-                                background:#f0f0f1; border:1px solid #c3c4c7; border-bottom:none;
-                                border-radius:4px 4px 0 0; text-decoration:none; color:#50575e;
-                                font-weight:500; font-size:13px; line-height:1.5; cursor:pointer;
-                        }
-                        .bsi-filter-tab:hover { background:#e5e5e7; color:#1d2327; }
-                        .bsi-filter-tab-active {
-                                background:#fff; border-bottom:1px solid #fff;
-                                color:#1d2327; font-weight:600;
-                        }
-                        </style>
-
-                        <!-- TAB: macro -->
-                        <div class="bsi-filter-tab-content" data-tab="macro" style="display:block;">
                         <!-- Макро-категории -->
                         <?php if ( ! empty( $scan_macro ) ) : ?>
                         <div class="bsi-card">
@@ -154,9 +114,6 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_
                         </div>
                         <?php endif; ?>
 
-                                                <!-- TAB: sub -->
-                        </div>
-                        <div class="bsi-filter-tab-content" data-tab="sub" style="display:none;">
                         <!-- Подкатегории -->
                         <?php if ( ! empty( $scan_sub ) ) : ?>
                         <div class="bsi-card">
@@ -193,9 +150,6 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_
                         </div>
                         <?php endif; ?>
 
-                                                <!-- TAB: brands -->
-                        </div>
-                        <div class="bsi-filter-tab-content" data-tab="brands" style="display:none;">
                         <!-- Бренды -->
                         <?php if ( ! empty( $scan_brands ) ) : ?>
                         <div class="bsi-card">
@@ -230,49 +184,7 @@ $has_scan = ! empty( $scan_macro ) || ! empty( $scan_brands ) || ! empty( $scan_
                         </div>
                         <?php endif; ?>
 
-                
-                                                <!-- TAB: gender -->
-                        </div>
-                        <div class="bsi-filter-tab-content" data-tab="gender" style="display:none;">
-                        <!-- Пол -->
-                        <?php if ( ! empty( $scan_genders ) ) : ?>
-                        <div class="bsi-card">
-                                <h2><?php esc_html_e( 'Пол', 'beestore-integration' ); ?> (<?php echo esc_html( count( $scan_genders ) ); ?>)</h2>
-                                <p style="margin-bottom:10px;">
-                                        <button type="button" class="button button-small bsi-select-all" data-target="bsi-gender-table"><?php esc_html_e( 'Выбрать все', 'beestore-integration' ); ?></button>
-                                        <button type="button" class="button button-small bsi-deselect-all" data-target="bsi-gender-table"><?php esc_html_e( 'Снять выделение', 'beestore-integration' ); ?></button>
-                                </p>
-                                <table class="widefat striped" id="bsi-gender-table">
-                                        <thead>
-                                                <tr>
-                                                        <th style="width:30px;">✓</th>
-                                                        <th><?php esc_html_e( 'Пол', 'beestore-integration' ); ?></th>
-                                                        <th style="width:100px;"><?php esc_html_e( 'Строк', 'beestore-integration' ); ?></th>
-                                                </tr>
-                                        </thead>
-                                        <tbody>
-                                                <?php foreach ( $scan_genders as $name => $count ) : ?>
-                                                        <?php $is_selected = isset( $filter_genders[ $name ] ); ?>
-                                                        <tr>
-                                                                <td><input type="checkbox" name="bsi_settings[filter_gender_check][<?php echo esc_attr( $name ); ?>]" value="1" <?php checked( $is_selected ); ?>></td>
-                                                                <td><strong><?php echo esc_html( $name ); ?></strong></td>
-                                                                <td><code><?php echo esc_html( $count ); ?></code></td>
-                                                        </tr>
-                                                <?php endforeach; ?>
-                                        </tbody>
-                                </table>
-                        </div>
-                        <?php endif; ?>
-
-                                                </div>
-
-                        		<!-- Предпросмотр количества товаров -->
-		<div class="bsi-card" style="background:#f0f6ff;border-left:4px solid #2271b1;">
-			<h2 style="margin-top:0;color:#2271b1;">📊 Предпросмотр импорта</h2>
-			<p id="bsi-preview-status" style="font-size:14px;">Нажмите галочки в фильтрах выше — здесь покажем сколько товаров будет импортировано.</p>
-		</div>
-
-		<?php submit_button( __( 'Сохранить фильтры', 'beestore-integration' ) ); ?>
+                <?php submit_button( __( 'Сохранить фильтры', 'beestore-integration' ) ); ?>
         </form>
         <?php else : ?>
                 <div class="bsi-card">
@@ -353,62 +265,5 @@ jQuery(document).ready(function($){
         $('.bsi-deselect-all').on('click', function() {
                 $('#' + $(this).data('target') + ' input[type="checkbox"]').prop('checked', false);
         });
-
-                // Переключение вкладок фильтров.
-                $('.bsi-filter-tab').on('click', function(e) {
-                        e.preventDefault();
-                        var tab = $(this).data('tab');
-                        $('.bsi-filter-tab').removeClass('bsi-filter-tab-active');
-                        $(this).addClass('bsi-filter-tab-active');
-                        $('.bsi-filter-tab-content').hide();
-                        $('.bsi-filter-tab-content[data-tab="' + tab + '"]').show();
-                });
-		// Предпросмотр количества товаров.
-		var previewTimer = null;
-		function updatePreview() {
-			var mode = jQuery('input[name="bsi_settings[import_filter_mode]"]:checked').val() || 'all';
-			var categories = [];
-			var brands = [];
-			var genders = [];
-			jQuery('input[name^="bsi_settings[filter_cat_check]"]').each(function() {
-				if (jQuery(this).is(':checked')) {
-					categories.push(jQuery(this).attr('name').match(/\]\[([^\]]+)\]/)[1]);
-				}
-			});
-			jQuery('input[name^="bsi_settings[filter_brand_check]"]').each(function() {
-				if (jQuery(this).is(':checked')) {
-					brands.push(jQuery(this).attr('name').match(/\]\[([^\]]+)\]/)[1]);
-				}
-			});
-			jQuery('input[name^="bsi_settings[filter_gender_check]"]').each(function() {
-				if (jQuery(this).is(':checked')) {
-					genders.push(jQuery(this).attr('name').match(/\]\[([^\]]+)\]/)[1]);
-				}
-			});
-			jQuery('#bsi-preview-status').html('<span class="spinner is-active" style="float:none;vertical-align:middle;"></span> Считаем...');
-			jQuery.post(bsiAdmin.ajaxUrl, {
-				action: 'bsi_preview_filter_count',
-				nonce: bsiAdmin.nonce,
-				mode: mode,
-				categories: categories,
-				brands: brands,
-				genders: genders
-			}, function(response) {
-				if (response.success) {
-					jQuery('#bsi-preview-status').html('<span style="color:#2271b1;font-weight:600;">📊 ' + response.data.message + '</span>');
-				} else {
-					jQuery('#bsi-preview-status').html('<span style="color:#666;">' + (response.data.message || '') + '</span>');
-				}
-			}).fail(function() {
-				jQuery('#bsi-preview-status').html('<span style="color:#c62828;">AJAX error</span>');
-			});
-		}
-		jQuery(document).on('change', 'input[name^="bsi_settings[filter_cat_check]"], input[name^="bsi_settings[filter_brand_check]"], input[name^="bsi_settings[filter_gender_check]"], input[name="bsi_settings[import_filter_mode]"]', function() {
-			if (previewTimer) clearTimeout(previewTimer);
-			previewTimer = setTimeout(updatePreview, 500);
-		});
-		updatePreview();
-
 });
-
 </script>

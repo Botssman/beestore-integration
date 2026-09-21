@@ -89,7 +89,6 @@ class BSI_Settings {
         }
 
         public function register_menu() {
-                // Главный пункт меню BeeStore виден всем менеджерам магазина.
                 $capability = 'manage_woocommerce';
 
                 add_menu_page(
@@ -97,24 +96,19 @@ class BSI_Settings {
                         __( 'BeeStore', 'beestore-integration' ),
                         $capability,
                         'beestore-integration',
-                        array( $this, 'render_redirect_page' ),
+                        array( $this, 'render_settings_page' ),
                         'dashicons-products',
                         58
                 );
 
-                // ВАЖНО: страница «Настройки» НЕ регистрируется как отдельный пункт меню.
-                // Она доступна только внутри вкладки «⚠ Для разработчика» (bsi-dev-zone),
-                // через рендер BSI_Admin::render_dev_zone_page() → BSI_Settings::render_settings_page().
-                // Так обычные админы не видят Настройки без ввода пароля.
-        }
-
-        /**
-         * Страница-редирект: если пользователь зашёл в BeeStore без подпункта —
-         * перенаправляем на «Импорт каталога» (это основная страница).
-         */
-        public function render_redirect_page() {
-                wp_safe_redirect( admin_url( 'admin.php?page=bsi-import' ) );
-                exit;
+                add_submenu_page(
+                        'beestore-integration',
+                        __( 'Настройки', 'beestore-integration' ),
+                        __( 'Настройки', 'beestore-integration' ),
+                        $capability,
+                        'beestore-integration',
+                        array( $this, 'render_settings_page' )
+                );
         }
 
         public function register_settings() {
@@ -166,16 +160,6 @@ class BSI_Settings {
                                 $limit = isset( $brand_limits[ $brand_name ] ) ? $brand_limits[ $brand_name ] : 0;
                                 $limit = '' === $limit ? 0 : absint( $limit );
                                 $output['import_filter_brands'][ $brand_name ] = $limit;
-                        }
-
-                        // Пол (genders) — просто список выбранных (без лимитов).
-                        $output['import_filter_genders'] = array();
-                        $gender_checks = isset( $input['filter_gender_check'] ) && is_array( $input['filter_gender_check'] ) ? $input['filter_gender_check'] : array();
-                        foreach ( $gender_checks as $gender_name => $checked ) {
-                                $gender_name = sanitize_text_field( $gender_name );
-                                if ( $gender_name ) {
-                                        $output['import_filter_genders'][ $gender_name ] = 1;
-                                }
                         }
 
                         return $output;

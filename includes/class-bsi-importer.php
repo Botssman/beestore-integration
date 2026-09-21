@@ -49,10 +49,6 @@ class BSI_Importer {
                 // Новые AJAX-эндпоинты для импорта с сохранением прогресса.
                 add_action( 'wp_ajax_bsi_import_start', array( $this, 'ajax_import_start' ) );
                 add_action( 'wp_ajax_bsi_import_process_batch', array( $this, 'ajax_import_process_batch' ) );
-
-                // Фоновый процесс — не зависит от вкладки и посещений.
-                add_action( 'wp_ajax_bsi_import_run_background', array( $this, 'ajax_import_run_background' ) );
-                add_action( 'wp_ajax_nopriv_bsi_import_run_background', array( $this, 'ajax_import_run_background' ) );
                 add_action( 'wp_ajax_bsi_import_pause', array( $this, 'ajax_import_pause' ) );
                 add_action( 'wp_ajax_bsi_import_continue', array( $this, 'ajax_import_continue' ) );
                 add_action( 'wp_ajax_bsi_import_stop', array( $this, 'ajax_import_stop' ) );
@@ -159,7 +155,6 @@ class BSI_Importer {
                         'updated_products' => 0,
                         'skipped_products' => 0,
                         'filtered_products' => 0,
-                        'deactivated_products' => 0,
                 );
                 return wp_parse_args( $state, $defaults );
         }
@@ -198,69 +193,23 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Импорт уже идёт. Обновите страницу.', 'beestore-integration' ) ) );
                 }
 
-                // ─── НОВАЯ ЛОГИКА: сначала проверяем FTP на свежий файл ─────────
-                // 1. Запрашиваем список файлов с FTP
-                // 2. Если на FTP есть файл новее чем локальный — скачиваем
-                // 3. Если FTP недоступен или новых файлов нет — используем локальный
-                // Это гарантирует что всегда импортируется самый свежий каталог.
-
+                // СНАЧАЛА ищем уже скачанный CSV во всех папках.
                 $upload_dir    = wp_upload_dir();
                 $beestore_dir  = trailingslashit( $upload_dir['basedir'] ) . 'beestore';
                 $dirs_to_check = array( 'downloads', 'extracted', 'processed', 'manual-downloads' );
 
-                // Собираем все локальные CSV.
-                $local_csvs = array();
+                $csvs = array();
                 foreach ( $dirs_to_check as $subdir ) {
                         $path = $beestore_dir . '/' . $subdir;
                         if ( is_dir( $path ) ) {
-                                $local_csvs = array_merge( $local_csvs, glob( $path . '/*.csv' ) );
-                                $local_csvs = array_merge( $local_csvs, glob( $path . '/*/*.csv' ) );
+                                $csvs = array_merge( $csvs, glob( $path . '/*.csv' ) );
+                                $csvs = array_merge( $csvs, glob( $path . '/*/*.csv' ) );
                         }
                 }
 
-                // Определяем sort_key самого свежего локального файла.
-                $local_latest_sort_key = '';
-                $local_latest_name = '';
-                foreach ( $local_csvs as $local_csv ) {
-                        $local_name = basename( $local_csv );
-                        if ( preg_match( '/^COMPANY_(\d+)_0000_([0-9\-]+)_([0-9\-]+)_(\d+)\.(zip|csv)$/i', $local_name, $m ) ) {
-                                $sort_key = $m[2] . '_' . $m[3]; // date_time
-                                if ( strcmp( $sort_key, $local_latest_sort_key ) > 0 ) {
-                                        $local_latest_sort_key = $sort_key;
-                                        $local_latest_name = $local_name;
-                                }
-                        }
-                }
-
-                // Пытаемся получить свежий файл с FTP.
-                $csv_file = '';
-                $remote_name = '';
-                $ftp_status = '';
-
-                if ( function_exists( 'set_time_limit' ) ) {
-                        @set_time_limit( 600 );
-                }
-                $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
-
-                if ( is_wp_error( $fetch_result ) ) {
-                        // FTP недоступен или новых файлов нет — используем локальный.
-                        $ftp_status = $fetch_result->get_error_message();
-                        BSI_Logger::instance()->warn( 'importer', 'FTP недоступен, используем локальный CSV', array(
-                                'err' => $ftp_status,
-                                'local_latest' => $local_latest_name,
-                        ) );
-
-                        if ( empty( $local_csvs ) ) {
-                                wp_send_json_error( array(
-                                        'message' => sprintf(
-                                                __( 'FTP недоступен: %s. Локальных CSV файлов тоже нет. Проверьте настройки FTP.', 'beestore-integration' ),
-                                                $ftp_status
-                                        ),
-                                ) );
-                        }
-
-                        // Используем самый свежий локальный файл.
-                        $full_catalog = array_filter( $local_csvs, function( $f ) {
+                if ( ! empty( $csvs ) ) {
+                        // Приоритет: файл с _0000001 в имени (полный каталог).
+                        $full_catalog = array_filter( $csvs, function( $f ) {
                                 return false !== strpos( basename( $f ), '_0000001.' );
                         });
                         if ( ! empty( $full_catalog ) ) {
@@ -269,20 +218,23 @@ class BSI_Importer {
                                 });
                                 $csv_file = $full_catalog[0];
                         } else {
-                                usort( $local_csvs, function( $a, $b ) {
+                                usort( $csvs, function( $a, $b ) {
                                         return filemtime( $b ) - filemtime( $a );
                                 });
-                                $csv_file = $local_csvs[0];
+                                $csv_file = $csvs[0];
                         }
                         $remote_name = basename( $csv_file );
                 } else {
-                        // FTP доступен —fresh файл скачан.
+                        // CSV нет — скачиваем с FTP.
+                        if ( function_exists( 'set_time_limit' ) ) {
+                                @set_time_limit( 600 );
+                        }
+                        $fetch_result = BSI_FTP::instance()->fetch_latest_zip();
+                        if ( is_wp_error( $fetch_result ) ) {
+                                wp_send_json_error( array( 'message' => $fetch_result->get_error_message() ) );
+                        }
                         $csv_file    = $fetch_result['csv'];
                         $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
-                        BSI_Logger::instance()->info( 'importer', 'Свежий CSV скачан с FTP', array(
-                                'remote_name' => $remote_name,
-                                'local_latest' => $local_latest_name,
-                        ) );
                 }
 
                 // Считаем количество строк.
@@ -352,7 +304,6 @@ class BSI_Importer {
                         'updated_products'  => 0,
                         'skipped_products'  => 0,
                         'filtered_products' => 0,
-                        'deactivated_products' => 0,
                 );
                 $this->save_import_state( $new_state );
 
@@ -360,137 +311,16 @@ class BSI_Importer {
                 update_option( 'bsi_last_import_zip', $remote_name );
                 update_option( 'bsi_last_import_started', current_time( 'mysql' ) );
 
-                // Планируем фоновую обработку через WP-Cron.
-                // Системный cron (настроен в cPanel) запускает wp-cron.php каждые 5 минут.
-                // WP-Cron запускает bsi_cron_background_batch который обрабатывает батчи.
-                $next = time() + 10; // Через 10 секунд (не 120 — раньше подхватит)
-                wp_schedule_single_event( $next, 'bsi_cron_background_batch' );
-
                 $this->log( 'info', 'Старт импорта (новая система с прогрессом)', array(
                         'file'        => $remote_name,
                         'total_rows'  => $total_rows,
                         'is_full'     => $is_full,
-                        'cron_scheduled' => $next,
                 ) );
 
                 wp_send_json_success( array(
                         'message'     => sprintf( __( 'Импорт запущен. Файл: %s, строк: %d', 'beestore-integration' ), $remote_name, $total_rows ),
                         'state'       => $new_state,
                 ) );
-        }
-
-        /**
-         * Запустить фоновый процесс — non-blocking HTTP запрос к самому себе.
-         * PHP процесс продолжит работать даже после закрытия вкладки браузера.
-         */
-        private function spawn_background_process() {
-                $token = wp_generate_password( 32, false );
-                update_option( 'bsi_background_token', $token, false );
-
-                $url = admin_url( 'admin-ajax.php' ) . '?action=bsi_import_run_background&token=' . $token;
-
-                wp_remote_post( $url, array(
-                        'timeout'   => 1,
-                        'blocking'  => false,
-                        'sslverify' => false,
-                ) );
-
-                $this->log( 'info', 'Фоновый процесс запущен (non-blocking HTTP)', array() );
-        }
-
-        /**
-         * AJAX: фоновый процесс — работает автономно.
-         */
-        public function ajax_import_run_background() {
-                $token = isset( $_GET['token'] ) ? sanitize_text_field( wp_unslash( $_GET['token'] ) ) : '';
-                $saved_token = get_option( 'bsi_background_token', '' );
-                if ( empty( $token ) || $token !== $saved_token ) {
-                        http_response_code( 403 );
-                        exit( 'Forbidden' );
-                }
-                delete_option( 'bsi_background_token' );
-
-                ignore_user_abort( true );
-                @set_time_limit( 0 );
-                @ini_set( 'memory_limit', '512M' );
-
-                // Закрываем соединение.
-                header( 'Connection: close' );
-                header( 'Content-Length: 0' );
-                header( 'Content-Encoding: none' );
-                while ( ob_get_level() > 0 ) { ob_end_clean(); }
-                ob_start();
-                echo '';
-                ob_end_flush();
-                flush();
-
-                // Авторизуемся.
-                $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
-                if ( ! empty( $admins ) ) {
-                        wp_set_current_user( $admins[0]->ID );
-                }
-                if ( ! defined( 'DOING_AJAX' ) ) {
-                        define( 'DOING_AJAX', true );
-                }
-
-                // Перехват wp_die.
-                remove_all_filters( 'wp_die_handler' );
-                add_filter( 'wp_die_handler', function() {
-                        return function( $m = '', $t = '', $a = array() ) {
-                                throw new Exception( 'batch_done' );
-                        };
-                }, 999 );
-
-                $this->log( 'info', 'Фоновый процесс: начал работу', array(
-                        'max_execution_time' => ini_get( 'max_execution_time' ),
-                ) );
-
-                // ГЛАВНЫЙ ЦИКЛ.
-                $start = microtime( true );
-                // ВАЖНО: 25 сек — хостинг убивает через 30 сек (max_execution_time).
-                // Перезапуск создаёт цепочку: 25сек → новый процесс → 25сек → ...
-                $max_sec = 25;
-                for ( $i = 0; $i < 100000; $i++ ) {
-                        $state = $this->get_import_state();
-                        if ( 'running' !== $state['status'] ) {
-                                $this->log( 'info', 'Фоновый процесс: импорт завершён', array(
-                                        'status' => $state['status'],
-                                        'processed' => $state['processed_rows'],
-                                        'total' => $state['total_rows'],
-                                ) );
-                                break;
-                        }
-
-                        if ( ( microtime( true ) - $start ) > $max_sec ) {
-                                // Лимит времени — перезапускаем себя.
-                                $this->log( 'info', 'Фоновый процесс: перезапуск (лимит времени)', array(
-                                        'elapsed' => round( microtime( true ) - $start, 1 ),
-                                        'processed' => $state['processed_rows'],
-                                ) );
-                                $this->spawn_background_process();
-                                break;
-                        }
-
-                        if ( false !== get_transient( 'bsi_background_stop' ) ) {
-                                delete_transient( 'bsi_background_stop' );
-                                $this->log( 'info', 'Фоновый процесс: остановлен пользователем', array() );
-                                break;
-                        }
-
-                        ob_start();
-                        try {
-                                $this->process_batch_core();
-                        } catch ( Exception $e ) {}
-                        ob_end_clean();
-
-                        usleep( 100000 ); // 0.1 сек пауза.
-                }
-
-                $this->log( 'info', 'Фоновый процесс: завершён', array(
-                        'iterations' => $i,
-                        'elapsed' => round( microtime( true ) - $start, 1 ),
-                ) );
-                exit;
         }
 
         /* ---------------------------------------------------------------------
@@ -502,41 +332,29 @@ class BSI_Importer {
                         wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'beestore-integration' ) ) );
                 }
 
-                $this->process_batch_core();
-        }
-
-        /**
-         * Обработка одного батча — без AJAX проверок (nonce, права).
-         * Используется и AJAX и cron.
-         *
-         * @return array Результат батча.
-         */
-        public function process_batch_core() {
                 $state = $this->get_import_state();
                 if ( 'running' !== $state['status'] ) {
                         wp_send_json_error( array( 'message' => sprintf( __( 'Импорт не запущен (статус: %s)', 'beestore-integration' ), $state['status'] ) ) );
                 }
 
-                // Проверяем lock — если другой процесс обрабатывает.
-                // ВАЖНО: используем current_time('timestamp') для age (lock хранится в time()).
-                // Если lock старый (> 60 сек) — процесс умер, сбрасываем.
+                // Проверяем lock — если cron или другой процесс уже импортирует,
+                // AJAX не запускает параллельный.
                 $lock = get_transient( 'bsi_import_lock' );
                 if ( false !== $lock ) {
                         $lock_age = time() - (int) $lock;
                         $lock_pid = (int) get_transient( 'bsi_import_lock_pid' );
                         $current_pid = function_exists( 'getmypid' ) ? getmypid() : 0;
-                        // Если lock от другого PID и свежий (< 60 сек) — выходим.
-                        if ( $lock_pid !== $current_pid && $lock_age < 60 ) {
+                        // Если lock от другого PID и свежий — выходим.
+                        if ( $lock_pid !== $current_pid && $lock_age < 1800 ) {
                                 wp_send_json_error( array(
                                         'message' => sprintf(
-                                                __( 'Импорт уже идёт в другом процессе (%1$d сек). Подождите.', 'beestore-integration' ),
-                                                $lock_age
+                                            /* translators: 1: секунды, 2: PID процесса */
+                                            __( 'Импорт уже идёт в другом процессе (%1$d сек, PID %2$d). Подождите или сбросьте lock.', 'beestore-integration' ),
+                                            $lock_age,
+                                            $lock_pid
                                         ),
                                 ) );
                         }
-                        // Lock старый (> 60 сек) — процесс умер, сбрасываем.
-                        delete_transient( 'bsi_import_lock' );
-                        delete_transient( 'bsi_import_lock_pid' );
                 }
 
                 if ( empty( $state['csv_file'] ) || ! file_exists( $state['csv_file'] ) ) {
@@ -686,15 +504,6 @@ class BSI_Importer {
                                 'pending_row'    => null, // хвоста не остаётся.
                         ) );
 
-                        // Применяем тег новинок после завершения импорта.
-                        if ( class_exists( 'BSI_Novelties' ) ) {
-                                BSI_Novelties::instance()->apply_novelties_tag();
-                        }
-
-                        $this->log( 'info', 'Импорт завершён!', array(
-                                'processed' => $state['total_rows'],
-                        ) );
-
                         wp_send_json_success( array(
                                 'message' => __( 'Импорт завершён!', 'beestore-integration' ),
                                 'state'   => $this->get_import_state(),
@@ -766,8 +575,7 @@ class BSI_Importer {
                                 } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
                                         $brand = $row['RaggruppamentoLinea'];
                                 }
-                                $gender = $this->extract_gender( $row );
-                                if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand, $gender ) ) {
+                                if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand ) ) {
                                         $skipped_by_filter++;
                                         continue;
                                 }
@@ -775,18 +583,13 @@ class BSI_Importer {
                                 $is_multi_variant = $total_count > 1;
                                 $existing_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu );
 
-                                // Сохраняем сезон ВСЕГДА — даже если товар не изменился.
-                                if ( $existing_id && class_exists( 'BSI_Novelties' ) ) {
-                                        BSI_Novelties::instance()->save_product_season( $existing_id, $data['parent'] );
-                                }
-
                                 // ─── Пропуск неизменённых товаров ──────────────────────
                                 if ( $existing_id && $this->product_unchanged( $existing_id, $data['variants'] ) ) {
                                         // Даже если данные не изменились — проверим статус по наличию
                                         // картинок В CSV (нет ни одного URLImg → черновик).
                                         $this->sync_visibility_by_images( $existing_id, $data['variants'] );
                                         $batch_skipped++;
-                                        BSI_Import_Filters::instance()->increment_counters( $category, $brand, $gender );
+                                        BSI_Import_Filters::instance()->increment_counters( $category, $brand );
                                         continue;
                                 }
 
@@ -799,7 +602,7 @@ class BSI_Importer {
                                 }
 
                                 $this->upsert_model( $igu, $data['parent'], $data['variants'], $is_multi_variant );
-                                BSI_Import_Filters::instance()->increment_counters( $category, $brand, $gender );
+                                BSI_Import_Filters::instance()->increment_counters( $category, $brand );
                                 if ( $existing_id ) {
                                         $batch_updated++;
                                         $item_name = ( ! empty( $data['parent']['DSArticoloAgg'] ) ) ? $data['parent']['DSArticoloAgg'] : ( ! empty( $data['parent']['DSArticolo'] ) ? $data['parent']['DSArticolo'] : $igu );
@@ -1904,10 +1707,9 @@ class BSI_Importer {
                         } elseif ( ! empty( $row['RaggruppamentoLinea'] ) ) {
                                 $brand = $row['RaggruppamentoLinea'];
                         }
-                        $gender = $this->extract_gender( $row );
 
                         // Проверяем фильтром — если не проходит, пропускаем строку.
-                        if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand, $gender ) ) {
+                        if ( ! BSI_Import_Filters::instance()->should_import( $category, $brand ) ) {
                                 $skipped_by_filter++;
                                 continue;
                         }
@@ -1947,13 +1749,7 @@ class BSI_Importer {
                 // Шаг 2: Если включено delete_out_of_stock — снять с публикации товары,
                 // не встретившиеся в выгрузке.
                 if ( $delete_oos ) {
-                        $deactivated_count = $this->deactivate_unseen_products();
-                        // Сохраняем количество деактивированных товаров в state.
-                        if ( $deactivated_count > 0 ) {
-                                $this->update_import_state( array(
-                                        'deactivated_products' => $deactivated_count,
-                                ) );
-                        }
+                        $this->deactivate_unseen_products();
                 }
 
                 $elapsed = round( microtime( true ) - $start_time, 2 );
@@ -1971,9 +1767,6 @@ class BSI_Importer {
                 // Снимаем lock импорта.
                 delete_transient( 'bsi_import_lock' );
                 delete_transient( 'bsi_import_lock_pid' );
-
-                // Хук: после импорта — применить тег новинок (и другие пост-обработки).
-                do_action( 'bsi_after_import', array(), $report );
 
                 return $report;
         }
@@ -1993,18 +1786,10 @@ class BSI_Importer {
                                 // Если товар уже существует и данные не изменились —
                                 // полностью пропускаем, без каких-либо операций WC.
                                 $existing_id = $this->find_product_by_meta( '_bsi_igu_articolo', $igu_articolo );
-
-                                // Сохраняем сезон ВСЕГДА — даже если товар не изменился.
-                                // Нужно для тега новинок.
-                                if ( $existing_id && class_exists( 'BSI_Novelties' ) ) {
-                                        BSI_Novelties::instance()->save_product_season( $existing_id, $data['parent'] );
-                                }
-
                                 if ( $existing_id && $this->product_unchanged( $existing_id, $data['variants'] ) ) {
                                         BSI_Import_Filters::instance()->increment_counters(
                                                 $this->extract_category( $data['parent'] ),
-                                                $this->extract_brand( $data['parent'] ),
-                                                $this->extract_gender( $data['parent'] )
+                                                $this->extract_brand( $data['parent'] )
                                         );
                                         continue;
                                 }
@@ -2015,11 +1800,6 @@ class BSI_Importer {
                                         'igu'  => $igu_articolo,
                                         'name' => ( ! empty( $data['parent']['DSArticoloAgg'] ) ) ? $data['parent']['DSArticoloAgg'] : $igu_articolo,
                                 ) );
-                                BSI_Import_Filters::instance()->increment_counters(
-                                        $this->extract_category( $data['parent'] ),
-                                        $this->extract_brand( $data['parent'] ),
-                                        $this->extract_gender( $data['parent'] )
-                                );
                         } catch ( Exception $e ) {
                                 $this->log( 'error', 'Ошибка импорта модели', array(
                                         'igu' => $igu_articolo,
@@ -2054,7 +1834,7 @@ class BSI_Importer {
                         $product_id = $this->upsert_simple_product( $igu_articolo, $parent_row, $variant_rows[0] );
                 }
 
-        // Сохраняем карту хешей вариаций (SKU → хеш) для быстрого определения
+                // Сохраняем карту хешей вариаций (SKU → хеш) для быстрого определения
                 // изменений при повторном импорте.
                 //
                 // ВАЖНО: мержим (добавляем/обновляем) в существующую карту вместо
@@ -2073,11 +1853,6 @@ class BSI_Importer {
                                 $map[ $sku ] = $this->compute_variant_hash( $row );
                         }
                         update_post_meta( $product_id, '_bsi_data_hash', $map );
-
-                        // Сохраняем сезон в meta — для тега новинок.
-                        if ( class_exists( 'BSI_Novelties' ) ) {
-                                BSI_Novelties::instance()->save_product_season( $product_id, $parent_row );
-                        }
                 }
 
                 return $product_id;
@@ -2230,23 +2005,6 @@ class BSI_Importer {
         }
 
         /**
-         * Извлечь пол из строки CSV.
-         * Единая логика: DSSessoWeb → DSSesso.
-         *
-         * @param array $row Строка CSV.
-         * @return string
-         */
-        private function extract_gender( $row ) {
-                $gender = '';
-                if ( ! empty( $row['DSSessoWeb'] ) ) {
-                        $gender = $row['DSSessoWeb'];
-                } elseif ( ! empty( $row['DSSesso'] ) ) {
-                        $gender = $row['DSSesso'];
-                }
-                return $gender;
-        }
-
-        /**
          * Найти IGUArticolo последней строки в массиве батча.
          * Используется для плавающего батча: чтобы не резать товар посреди
          * вариантов, смотрим IGU той строки, на которой «споткнулись» о лимит.
@@ -2345,16 +2103,7 @@ class BSI_Importer {
                         }
                 }
 
-                // ─── Проверка meta _bsi_original_purchase ────────────────────
-                // Если meta не сохранена (товар импортирован до v1.9.30) — считаем
-                // товар изменённым, чтобы apply_pricing() сохранил meta и пересчитал
-                // цену по правильной формуле (с floor_price).
-                $original_purchase = get_post_meta( $product_id, '_bsi_original_purchase', true );
-                if ( empty( $original_purchase ) ) {
-                        return false; // Meta нет — нужно обновить (сохранит purchase и пересчитает цену).
-                }
-
-                // Все вариации совпали + картинки на месте + meta есть → товар не изменился.
+                // Все вариации совпали + картинки на месте → товар не изменился.
                 return true;
         }
 
@@ -3381,44 +3130,20 @@ class BSI_Importer {
         private function ensure_term( $name, $taxonomy, $parent_name = '' ) {
                 $parent = 0;
                 if ( $parent_name ) {
-                        // Сначала ищем по оригинальному имени.
                         $parent_term = term_exists( $parent_name, $taxonomy );
-                        // Если не найден — ищем по переводу (терм мог быть переименован).
-                        if ( ! is_array( $parent_term ) ) {
-                                $parent_translated = BSI_Translations::instance()->get_translation( $taxonomy, $parent_name );
-                                if ( $parent_translated ) {
-                                        $parent_term = term_exists( $parent_translated, $taxonomy );
-                                }
-                        }
                         if ( is_array( $parent_term ) ) {
                                 $parent = (int) $parent_term['term_id'];
                         }
                 }
 
-                // 1. Сначала ищем по оригинальному имени.
                 $existing = term_exists( $name, $taxonomy, $parent );
                 if ( is_array( $existing ) ) {
                         return (int) $existing['term_id'];
                 }
 
-                // 2. Ищем по переводу (терм мог быть переименован в русский).
-                // Это предотвращает создание дублей с slug "-2".
-                $translated = BSI_Translations::instance()->get_translation( $taxonomy, $name );
-                if ( $translated ) {
-                        $existing = term_exists( $translated, $taxonomy, $parent );
-                        if ( is_array( $existing ) ) {
-                                // Терм уже существует (был переименован) — возвращаем его.
-                                return (int) $existing['term_id'];
-                        }
-                }
-
-                // 3. Создаём новый терм.
                 $result = wp_insert_term( $name, $taxonomy, array( 'parent' => $parent ) );
                 if ( ! is_wp_error( $result ) ) {
-                        $term_id = (int) $result['term_id'];
-                        // Сохраняем оригинальное имя в meta — нужно для страницы Переводов.
-                        update_term_meta( $term_id, '_bsi_original_name', $name );
-                        return $term_id;
+                        return (int) $result['term_id'];
                 }
                 return 0;
         }
@@ -4189,9 +3914,6 @@ class BSI_Importer {
                 }
 
                 $this->log( 'info', 'Сняты с публикации отсутствующие товары', array( 'count' => $deactivated ) );
-
-                // Возвращаем количество деактивированных товаров для отображения в UI.
-                return $deactivated;
         }
 
         /* ---------------------------------------------------------------------

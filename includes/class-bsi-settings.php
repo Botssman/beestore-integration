@@ -22,7 +22,9 @@ class BSI_Settings {
         }
 
         private function __construct() {
-                add_action( 'admin_menu', array( $this, 'register_menu' ) );
+                // С v2.0.1 страница настроек НЕ регистрирует отдельное меню —
+                // она доступна как внутренняя вкладка внутри «⚠ Для разработчика».
+                // Меню BeeStore (главный пункт) теперь регистрируется в BSI_Admin::register_submenus().
                 add_action( 'admin_init', array( $this, 'register_settings' ) );
 
                 // При сохранении настроек — пересоздаём cron-расписания.
@@ -88,27 +90,19 @@ class BSI_Settings {
                 return $schedules;
         }
 
+        /**
+         * Бывшая регистрация отдельного меню «Настройки».
+         *
+         * Начиная с v2.0.1 страница настроек НЕ имеет собственного пункта меню —
+         * она доступна как внутренняя вкладка «⚙️ Настройки» внутри страницы
+         * «⚠ Для разработчика» (bsi-dev-zone), защищённой паролем.
+         *
+         * Метод оставлен как no-op для обратной совместимости (на случай,
+         * если сторонний код вызывал его напрямую). Хук admin_menu больше
+         * не регистрируется — см. конструктор выше.
+         */
         public function register_menu() {
-                $capability = 'manage_woocommerce';
-
-                add_menu_page(
-                        __( 'BeeStore Integration', 'beestore-integration' ),
-                        __( 'BeeStore', 'beestore-integration' ),
-                        $capability,
-                        'beestore-integration',
-                        array( $this, 'render_settings_page' ),
-                        'dashicons-products',
-                        58
-                );
-
-                add_submenu_page(
-                        'beestore-integration',
-                        __( 'Настройки', 'beestore-integration' ),
-                        __( 'Настройки', 'beestore-integration' ),
-                        $capability,
-                        'beestore-integration',
-                        array( $this, 'render_settings_page' )
-                );
+                // No-op с v2.0.1.
         }
 
         public function register_settings() {

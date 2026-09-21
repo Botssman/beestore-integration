@@ -2,12 +2,29 @@
 /**
  * Шаблон страницы диагностики.
  *
+ * С v2.0.1 может рендериться как внутри dev-zone (?page=bsi-dev-zone&devtab=diag),
+ * так и отдельно. URL кнопок тестов строятся с учётом контекста.
+ *
  * @package BeeStoreIntegration
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
         exit;
 }
+
+// Определяем, находимся ли мы внутри dev-zone (вкладка diag).
+$bsi_diag_in_devzone = isset( $_GET['devtab'] ) && 'diag' === sanitize_key( $_GET['devtab'] );
+$bsi_diag_page_slug  = $bsi_diag_in_devzone ? 'bsi-dev-zone&devtab=diag' : 'bsi-diagnostics';
+
+// URL кнопок тестов (с nonce).
+$bsi_diag_soap_url = wp_nonce_url(
+        admin_url( 'admin.php?page=' . $bsi_diag_page_slug . '&run=soap' ),
+        'bsi_test_soap'
+);
+$bsi_diag_ftp_url = wp_nonce_url(
+        admin_url( 'admin.php?page=' . $bsi_diag_page_slug . '&run=ftp' ),
+        'bsi_test_ftp'
+);
 ?>
 
 <div class="wrap">
@@ -97,7 +114,7 @@ if ( ! defined( 'ABSPATH' ) ) {
         <div class="bsi-card">
                 <h2><?php esc_html_e( 'Тест SOAP-подключения', 'beestore-integration' ); ?></h2>
                 <p>
-                        <a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin.php?page=bsi-diagnostics&run=soap' ), 'bsi_test_soap' ) ); ?>" class="button button-primary">
+                        <a href="<?php echo esc_url( $bsi_diag_soap_url ); ?>" class="button button-primary">
                                 <?php esc_html_e( 'Запустить тест SOAP', 'beestore-integration' ); ?>
                         </a>
                 </p>
@@ -114,7 +131,7 @@ if ( ! defined( 'ABSPATH' ) ) {
         <div class="bsi-card">
                 <h2><?php esc_html_e( 'Тест FTP-подключения', 'beestore-integration' ); ?></h2>
                 <p>
-                        <a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin.php?page=bsi-diagnostics&run=ftp' ), 'bsi_test_ftp' ) ); ?>" class="button button-primary">
+                        <a href="<?php echo esc_url( $bsi_diag_ftp_url ); ?>" class="button button-primary">
                                 <?php esc_html_e( 'Запустить тест FTP', 'beestore-integration' ); ?>
                         </a>
                 </p>

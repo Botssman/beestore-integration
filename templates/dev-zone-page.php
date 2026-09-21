@@ -6,13 +6,16 @@
  *   1. Право 'manage_options' (проверяется в BSI_Admin::render_dev_zone_page)
  *   2. Дополнительный пароль (4-часовая сессия через transient)
  *
- * Содержит:
- *   - Удаление ВСЕХ картинок BeeStore (из БД + с диска)
- *   - Удаление только дублей картинок
- *   - Очистка диска: дубликаты файлов (-1, -2, -3 суффиксы)
- *   - Скан orphan миниатюр WordPress
- *   - Удаление orphan миниатюр
- *   - Смена пароля
+ * С v2.0.1 страница содержит внутренние вкладки (класс bsi-devtab, НЕ nav-tab,
+ * чтобы не конфликтовать с settings-page.js, который перехватывает клики по .nav-tab):
+ *   - ⚙️ Настройки       → BSI_Settings::instance()->render_settings_page()
+ *   - 📁 Каталог с FTP   → BSI_Admin::instance()->render_catalog_browser_page()
+ *   - 📜 Логи            → BSI_Admin::instance()->render_logs_page()
+ *   - 🔍 Диагностика     → BSI_Admin::instance()->render_diagnostics_page()
+ *   - ⚠ Опасные операции → удаление товаров/картинок/дублей, смена пароля
+ *
+ * Парольная защита оборачивает ВСЕ вкладки — проверка $session идёт до
+ * рендера навигации и контента.
  *
  * @package BeeStoreIntegration
  */
@@ -25,12 +28,70 @@ if ( ! defined( 'ABSPATH' ) ) {
 if ( ! isset( $session ) ) {
         $session = false;
 }
+
+// Определяем активную внутреннюю вкладку (по умолчанию — «Опасные операции»).
+$current_tab = isset( $_GET['devtab'] ) ? sanitize_key( wp_unslash( $_GET['devtab'] ) ) : 'danger';
+
+// Список внутренних вкладок dev-zone.
+$bsi_dev_tabs = array(
+        'settings' => __( '⚙️ Настройки', 'beestore-integration' ),
+        'catalog'  => __( '📁 Каталог с FTP', 'beestore-integration' ),
+        'logs'     => __( '📜 Логи', 'beestore-integration' ),
+        'diag'     => __( '🔍 Диагностика', 'beestore-integration' ),
+        'danger'   => __( '⚠ Опасные операции', 'beestore-integration' ),
+);
+
+// Защита от подделки devtab-параметра.
+if ( ! isset( $bsi_dev_tabs[ $current_tab ] ) ) {
+        $current_tab = 'danger';
+}
 ?>
+
+<style>
+/* ═══ Стили внутренних вкладок dev-zone ═══ */
+/* Используем .bsi-devtab (НЕ .nav-tab), чтобы JS из settings-page.php
+   не перехватывал клики по этим вкладкам. */
+.bsi-devtab-wrapper {
+        border-bottom: 1px solid #c3c4c7;
+        margin: 15px 0 20px;
+        padding: 0;
+        line-height: inherit;
+}
+.bsi-devtab {
+        display: inline-block;
+        padding: 9px 18px;
+        margin: 0 2px 0 0;
+        text-decoration: none;
+        border: 1px solid #c3c4c7;
+        border-bottom: none;
+        background: #f0f0f1;
+        color: #50575e;
+        border-radius: 4px 4px 0 0;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1.4;
+        transition: background 0.12s ease, color 0.12s ease;
+}
+.bsi-devtab:hover,
+.bsi-devtab:focus {
+        background: #fff;
+        color: #135e96;
+        box-shadow: none;
+}
+.bsi-devtab.bsi-devtab-active {
+        background: #fff;
+        border-bottom: 1px solid #fff;
+        color: #1d2327;
+        font-weight: 600;
+        position: relative;
+        top: 1px;
+}
+</style>
 
 <div class="wrap bsi-wrap">
         <h1>
                 <span class="dashicons dashicons-shield" style="color:#d63638;"></span>
-                <?php esc_html_e( '⚠ Для разработчика — Опасная зона', 'beestore-integration' ); ?>
+                <?php esc_html_e( '⚠ Для разработчика', 'beestore-integration' ); ?>
         </h1>
 
         <?php if ( ! $session ) : ?>
@@ -72,16 +133,16 @@ if ( ! isset( $session ) ) {
                 </div>
 
                 <div class="bsi-card" style="max-width:500px;">
-			<h3>Что в опасной зоне?</h3>
-			<ul style="list-style:disc;padding-left:20px;">
-				<li><strong style="color:#c62828;">Удаление ВСЕХ товаров и атрибутов BeeStore</strong> — полная очистка каталога</li>
-				<li><strong style="color:#d63638;">Удаление всех картинок BeeStore</strong> — полная очистка Media Library от картинок плагина</li>
-				<li><strong style="color:#d63636;">Удаление дублей картинок</strong> — оставляет по одной каждого изображения</li>
-				<li><strong style="color:#d63638;">Очистка диска от дублей файлов</strong> — удаление файлов с суффиксами -1, -2, -3</li>
-				<li><strong style="color:#d63628;">Удаление orphan миниатюр</strong> — миниатюры с незарегистрированными размерами</li>
-				<li><strong>Смена пароля</strong></li>
-			</ul>
-		</div>
+                        <h3>Что в опасной зоне?</h3>
+                        <ul style="list-style:disc;padding-left:20px;">
+                                <li><strong style="color:#c62828;">Удаление ВСЕХ товаров и атрибутов BeeStore</strong> — полная очистка каталога</li>
+                                <li><strong style="color:#d63638;">Удаление всех картинок BeeStore</strong> — полная очистка Media Library от картинок плагина</li>
+                                <li><strong style="color:#d63636;">Удаление дублей картинок</strong> — оставляет по одной каждого изображения</li>
+                                <li><strong style="color:#d63638;">Очистка диска от дублей файлов</strong> — удаление файлов с суффиксами -1, -2, -3</li>
+                                <li><strong style="color:#d63628;">Удаление orphan миниатюр</strong> — миниатюры с незарегистрированными размерами</li>
+                                <li><strong>Смена пароля</strong></li>
+                        </ul>
+                </div>
 
         <?php else : ?>
                 <!-- ═══ АВТОРИЗОВАН — показываем инструменты ═══ -->
@@ -104,6 +165,44 @@ if ( ! isset( $session ) ) {
                                 </button>
                         </form>
                 </div>
+
+                <!-- ═══ Внутренние вкладки dev-zone (класс bsi-devtab, НЕ nav-tab) ═══ -->
+                <h2 class="bsi-devtab-wrapper">
+                        <?php foreach ( $bsi_dev_tabs as $tab_id => $tab_label ) : ?>
+                                <a href="<?php echo esc_url( admin_url( 'admin.php?page=bsi-dev-zone&devtab=' . $tab_id ) ); ?>"
+                                   class="bsi-devtab <?php echo $current_tab === $tab_id ? 'bsi-devtab-active' : ''; ?>">
+                                        <?php echo esc_html( $tab_label ); ?>
+                                </a>
+                        <?php endforeach; ?>
+                </h2>
+
+                <?php
+                // ═══ Рендер контента активной вкладки ═══
+                switch ( $current_tab ) {
+                        case 'settings':
+                                // ⚙️ Настройки — форма настроек плагина.
+                                BSI_Settings::instance()->render_settings_page();
+                                break;
+
+                        case 'catalog':
+                                // 📁 Каталог с FTP — просмотр и скачивание файлов BeeStore.
+                                BSI_Admin::instance()->render_catalog_browser_page();
+                                break;
+
+                        case 'logs':
+                                // 📜 Логи — журнал работы плагина.
+                                BSI_Admin::instance()->render_logs_page();
+                                break;
+
+                        case 'diag':
+                                // 🔍 Диагностика — проверка PHP-окружения, SOAP/FTP, WP-Cron.
+                                BSI_Admin::instance()->render_diagnostics_page();
+                                break;
+
+                        case 'danger':
+                        default:
+                                // ⚠ Опасные операции — инструменты удаления данных + смена пароля.
+                                ?>
 
                 <!-- ═══ 1. УДАЛЕНИЕ ВСЕХ ТОВАРОВ И АТРИБУТОВ BEESTORE ═══ -->
                 <div class="bsi-card" style="border-left:4px solid #c62828;background:#fef7f7;">
@@ -292,11 +391,16 @@ if ( ! isset( $session ) ) {
                         </table>
                 </div>
 
+                                <?php
+                                break;
+                } // end switch ( $current_tab )
+                ?>
+
         <?php endif; ?>
 </div>
 
-<!-- ═══ JavaScript (только если авторизован) ═══ -->
-<?php if ( $session ) : ?>
+<!-- ═══ JavaScript (только если авторизован И активна вкладка danger) ═══ -->
+<?php if ( $session && 'danger' === $current_tab ) : ?>
 <script>
 jQuery(function($) {
         // ═══ Полная очистка: удалить все товары и атрибуты BeeStore ═══

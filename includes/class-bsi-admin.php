@@ -28,12 +28,26 @@ class BSI_Admin {
         public function register_submenus() {
                 $cap = 'manage_woocommerce';
 
+                // С v2.0.1: главное меню BeeStore регистрируется здесь (раньше — в BSI_Settings).
+                // Колбэк указывает на страницу импорта, чтобы клик по «BeeStore» вёл на Импорт каталога.
+                add_menu_page(
+                        __( 'BeeStore Integration', 'beestore-integration' ),
+                        __( 'BeeStore', 'beestore-integration' ),
+                        $cap,
+                        'beestore-integration',
+                        array( $this, 'render_import_page' ),
+                        'dashicons-products',
+                        58
+                );
+
+                // Переопределяем авто-созданный первый подпункт (по умолчанию «BeeStore»)
+                // на «Импорт каталога» — это и есть landing page главного меню.
                 add_submenu_page(
                         'beestore-integration',
                         __( 'Импорт каталога', 'beestore-integration' ),
                         __( 'Импорт каталога', 'beestore-integration' ),
                         $cap,
-                        'bsi-import',
+                        'beestore-integration',
                         array( $this, 'render_import_page' )
                 );
 
@@ -44,15 +58,6 @@ class BSI_Admin {
                         $cap,
                         'bsi-pricing',
                         array( $this, 'render_pricing_page' )
-                );
-
-                add_submenu_page(
-                        'beestore-integration',
-                        __( 'Каталог с FTP', 'beestore-integration' ),
-                        __( 'Каталог с FTP', 'beestore-integration' ),
-                        $cap,
-                        'bsi-catalog-browser',
-                        array( $this, 'render_catalog_browser_page' )
                 );
 
                 add_submenu_page(
@@ -73,28 +78,17 @@ class BSI_Admin {
                         array( $this, 'render_filters_page' )
                 );
 
-                add_submenu_page(
-                        'beestore-integration',
-                        __( 'Логи', 'beestore-integration' ),
-                        __( 'Логи', 'beestore-integration' ),
-                        $cap,
-                        'bsi-logs',
-                        array( $this, 'render_logs_page' )
-                );
-
-                add_submenu_page(
-                        'beestore-integration',
-                        __( 'Диагностика', 'beestore-integration' ),
-                        __( 'Диагностика', 'beestore-integration' ),
-                        $cap,
-                        'bsi-diagnostics',
-                        array( $this, 'render_diagnostics_page' )
-                );
-
                 // ⚠ Опасная зона — только для разработчика.
                 // Доступ: capability 'manage_options' + дополнительный пароль
                 // (хранится в опции bsi_dev_zone_password, по умолчанию 'beestore-dev').
                 // Пароль можно сменить на этой же странице.
+                //
+                // С v2.0.1 внутри этой страницы (после ввода пароля) есть внутренние вкладки:
+                //   - ⚙️ Настройки       (BSI_Settings::render_settings_page)
+                //   - 📁 Каталог с FTP   (render_catalog_browser_page)
+                //   - 📜 Логи            (render_logs_page)
+                //   - 🔍 Диагностика     (render_diagnostics_page)
+                //   - ⚠ Опасные операции (удаление данных)
                 add_submenu_page(
                         'beestore-integration',
                         __( '⚠ Для разработчика', 'beestore-integration' ),
@@ -103,6 +97,10 @@ class BSI_Admin {
                         'bsi-dev-zone',
                         array( $this, 'render_dev_zone_page' )
                 );
+
+                // ВАЖНО: Каталог с FTP, Логи и Диагностика с v2.0.1 НЕ регистрируются
+                // как отдельные пункты меню — они доступны только как внутренние вкладки
+                // внутри «⚠ Для разработчика». См. templates/dev-zone-page.php.
         }
 
         public function enqueue_admin_assets( $hook ) {

@@ -204,6 +204,29 @@ if ( ! isset( $bsi_dev_tabs[ $current_tab ] ) ) {
                                 // ⚠ Опасные операции — инструменты удаления данных + смена пароля.
                                 ?>
 
+                <!-- ═══ 0. type-to-confirm ГЕЙТ (#14 ФИКС) ═══ -->
+                <div class="bsi-card" style="border-left:4px solid #996600;background:#fff8e1;">
+                        <h2 style="color:#996600;">
+                                <span class="dashicons dashicons-shield"></span>
+                                <?php esc_html_e( 'Подтверждение доступа к опасным операциям', 'beestore-integration' ); ?>
+                        </h2>
+                        <p>
+                                <?php esc_html_e( 'Все кнопки ниже заблокированы. Чтобы их разблокировать — введите слово DELETE в поле и нажмите «Разблокировать».', 'beestore-integration' ); ?>
+                        </p>
+                        <p>
+                                <input type="text" id="bsi-danger-unlock-input" autocomplete="off" placeholder="<?php esc_attr_e( 'Введите DELETE', 'beestore-integration' ); ?>" style="width:200px;text-transform:uppercase;font-weight:600;letter-spacing:2px;">
+                                <button type="button" class="button button-secondary" id="bsi-danger-unlock-btn">
+                                        <span class="dashicons dashicons-unlock"></span>
+                                        <?php esc_html_e( 'Разблокировать', 'beestore-integration' ); ?>
+                                </button>
+                                <button type="button" class="button" id="bsi-danger-lock-btn" style="display:none;background:#996600;color:#fff;border-color:#996600;">
+                                        <span class="dashicons dashicons-lock"></span>
+                                        <?php esc_html_e( 'Заблокировать снова', 'beestore-integration' ); ?>
+                                </button>
+                                <span id="bsi-danger-unlock-status" style="margin-left:10px;font-weight:600;"></span>
+                        </p>
+                </div>
+
                 <!-- ═══ 1. УДАЛЕНИЕ ВСЕХ ТОВАРОВ И АТРИБУТОВ BEESTORE ═══ -->
                 <div class="bsi-card" style="border-left:4px solid #c62828;background:#fef7f7;">
                         <h2 style="color:#c62828;">
@@ -217,7 +240,7 @@ if ( ! isset( $bsi_dev_tabs[ $current_tab ] ) ) {
                                 <?php esc_html_e( 'Это действие необратимо! Используйте, если импорт пошёл криво (например, бренды создались неправильно) и хотите начать с чистого листа.', 'beestore-integration' ); ?>
                         </p>
                         <p>
-                                <button type="button" class="button button-link-delete" id="bsi-purge-all">
+                                <button type="button" class="button button-link-delete bsi-danger-btn" id="bsi-purge-all" disabled>
                                         <span class="dashicons dashicons-trash"></span>
                                         <?php esc_html_e( 'Удалить все товары и атрибуты BeeStore', 'beestore-integration' ); ?>
                                 </button>
@@ -242,7 +265,7 @@ if ( ! isset( $bsi_dev_tabs[ $current_tab ] ) ) {
                                 <?php esc_html_e( 'Полезно когда накопились дубликаты или когда нужно пересоздать картинки с нуля после ошибки.', 'beestore-integration' ); ?>
                         </p>
                         <p>
-                                <button type="button" class="button button-secondary" id="bsi-purge-images">
+                                <button type="button" class="button button-secondary bsi-danger-btn" id="bsi-purge-images" disabled>
                                         <span class="dashicons dashicons-trash"></span>
                                         <?php esc_html_e( 'Удалить только картинки BeeStore', 'beestore-integration' ); ?>
                                 </button>
@@ -264,7 +287,7 @@ if ( ! isset( $bsi_dev_tabs[ $current_tab ] ) ) {
                                 <?php esc_html_e( 'Группирует все attachments BeeStore по basename. Для каждой группы с > 1 attachment — оставляет первый (самый старый), остальные удаляет. Также проверяет по _wp_attached_file.', 'beestore-integration' ); ?>
                         </p>
                         <p>
-                                <button type="button" class="button button-secondary" id="bsi-purge-dup-images" style="border-color:#f57c00;color:#f57c00;">
+                                <button type="button" class="button button-secondary bsi-danger-btn" id="bsi-purge-dup-images" style="border-color:#f57c00;color:#f57c00;" disabled>
                                         <span class="dashicons dashicons-admin-page"></span>
                                         <?php esc_html_e( 'Удалить только дубликаты картинок', 'beestore-integration' ); ?>
                                 </button>
@@ -317,7 +340,7 @@ if ( ! isset( $bsi_dev_tabs[ $current_tab ] ) ) {
                                         <span class="dashicons dashicons-search"></span>
                                         <?php esc_html_e( 'Сканировать диск на дубли', 'beestore-integration' ); ?>
                                 </button>
-                                <button type="button" class="button" id="bsi-delete-disk-dup" style="display:none;background:#d63638;color:#fff;border-color:#d63638;">
+                                <button type="button" class="button button-secondary bsi-danger-btn" id="bsi-delete-disk-dup" style="display:none;background:#d63638;color:#fff;border-color:#d63638;" disabled>
                                         <span class="dashicons dashicons-trash"></span>
                                         <?php esc_html_e( 'УДАЛИТЬ ВСЕ ДУБЛИ С ДИСКА', 'beestore-integration' ); ?>
                                 </button>
@@ -403,10 +426,63 @@ if ( ! isset( $bsi_dev_tabs[ $current_tab ] ) ) {
 <?php if ( $session && 'danger' === $current_tab ) : ?>
 <script>
 jQuery(function($) {
+        // ═══ #14 ФИКС: type-to-confirm ГЕЙТ для опасных операций ═══
+        // Все кнопки с классом .bsi-danger-btn по умолчанию disabled (HTML).
+        // Чтобы их разблокировать, пользователь должен ввести "DELETE" в поле.
+        // Состояние не сохраняется между перезагрузками страницы.
+        var bsiDangerUnlocked = false;
+
+        function bsiUpdateDangerButtons() {
+                $('.bsi-danger-btn').prop('disabled', !bsiDangerUnlocked);
+        }
+
+        function bsiSetUnlockState(unlocked) {
+                bsiDangerUnlocked = unlocked;
+                bsiUpdateDangerButtons();
+                if (unlocked) {
+                        $('#bsi-danger-unlock-btn').hide();
+                        $('#bsi-danger-lock-btn').show();
+                        $('#bsi-danger-unlock-input').prop('disabled', true);
+                        $('#bsi-danger-unlock-status').html('<span style="color:#c62828;">⚠ ОПАСНЫЕ КНОПКИ РАЗБЛОКИРОВАНЫ</span>');
+                } else {
+                        $('#bsi-danger-unlock-btn').show();
+                        $('#bsi-danger-lock-btn').hide();
+                        $('#bsi-danger-unlock-input').prop('disabled', false).val('');
+                        $('#bsi-danger-unlock-status').html('<span style="color:#996600;">🔒 Кнопки заблокированы</span>');
+                }
+        }
+
+        $('#bsi-danger-unlock-btn').on('click', function(e) {
+                e.preventDefault();
+                var val = $('#bsi-danger-unlock-input').val().toUpperCase().trim();
+                if (val === 'DELETE') {
+                        bsiSetUnlockState(true);
+                } else {
+                        $('#bsi-danger-unlock-status').html('<span style="color:#c62828;">✗ Введите слово DELETE точно</span>');
+                        $('#bsi-danger-unlock-input').val('').focus();
+                }
+        });
+
+        $('#bsi-danger-unlock-input').on('keypress', function(e) {
+                if (e.which === 13) { // Enter
+                        e.preventDefault();
+                        $('#bsi-danger-unlock-btn').trigger('click');
+                }
+        });
+
+        $('#bsi-danger-lock-btn').on('click', function(e) {
+                e.preventDefault();
+                bsiSetUnlockState(false);
+        });
+
+        // При загрузке — кнопки уже disabled (HTML), но явно синхронизируем состояние.
+        bsiUpdateDangerButtons();
+
         // ═══ Полная очистка: удалить все товары и атрибуты BeeStore ═══
         var purgeAbort = false;
         $('#bsi-purge-all').on('click', function(e) {
                 e.preventDefault();
+                if (!bsiDangerUnlocked) return; // защита от tampering
                 if (!confirm('<?php esc_attr_e( 'ВНИМАНИЕ! Будут удалены ВСЕ товары BeeStore, атрибуты, категории. Это НЕОБРАТИМО! Вы уверены?', 'beestore-integration' ); ?>')) return;
                 var $btn = $(this);
                 purgeAbort = false;
@@ -448,6 +524,7 @@ jQuery(function($) {
         var purgeImgAbort = false;
         $('#bsi-purge-images').on('click', function(e) {
                 e.preventDefault();
+                if (!bsiDangerUnlocked) return;
                 if (!confirm('<?php esc_attr_e( 'Удалить ВСЕ картинки BeeStore из Media Library? Это необратимо. Товары останутся.', 'beestore-integration' ); ?>')) return;
                 var $btn = $(this);
                 $btn.prop('disabled', true);
@@ -502,6 +579,7 @@ jQuery(function($) {
         // ═══ Удаление только дублей картинок ═══
         $('#bsi-purge-dup-images').on('click', function(e) {
                 e.preventDefault();
+                if (!bsiDangerUnlocked) return;
                 if (!confirm('<?php esc_attr_e( 'Удалить дубликаты картинок? Останется по одной каждого изображения.', 'beestore-integration' ); ?>')) return;
                 var $btn = $(this);
                 $btn.prop('disabled', true);
@@ -557,6 +635,7 @@ jQuery(function($) {
 
                                 if (d.duplicates_count > 0) {
                                         $('#bsi-delete-disk-dup').show();
+                                        bsiUpdateDangerButtons(); // уважаем текущее состояние блокировки
                                         $('#bsi-disk-status').html('<span style="color:#d63638;">Найдено ' + d.duplicates_count + ' дублей.</span>');
 
                                         var html = '<strong>Превью (первые 100):</strong><br>';
@@ -583,7 +662,8 @@ jQuery(function($) {
 
         function bsiDeleteDiskDupBatch() {
                 if (bsiDiskDup.abort) {
-                        $('#bsi-delete-disk-dup').show().prop('disabled', false);
+                        $('#bsi-delete-disk-dup').show();
+                        bsiUpdateDangerButtons();
                         $('#bsi-delete-disk-dup-cancel').hide();
                         $('#bsi-disk-status').html('<span style="color:#f57c00;">⏸ Остановлено. Удалено: ' + bsiDiskDup.deletedTotal + '</span>');
                         return;
@@ -606,19 +686,22 @@ jQuery(function($) {
                                 if (d.has_more && !bsiDiskDup.abort) {
                                         setTimeout(bsiDeleteDiskDupBatch, 500);
                                 } else {
-                                        $('#bsi-delete-disk-dup').show().prop('disabled', false);
+                                        $('#bsi-delete-disk-dup').show();
+                                        bsiUpdateDangerButtons();
                                         $('#bsi-delete-disk-dup-cancel').hide();
                                         var msg = '✓ Готово! Удалено: ' + bsiDiskDup.deletedTotal + ', освобождено: ' + bsiFormatBytes(bsiDiskDup.freedTotal);
                                         $('#bsi-disk-status').html('<span style="color:#2e7d32;">' + msg + '</span>');
                                         $('#bsi-scan-disk').trigger('click');
                                 }
                         } else {
-                                $('#bsi-delete-disk-dup').show().prop('disabled', false);
+                                $('#bsi-delete-disk-dup').show();
+                                bsiUpdateDangerButtons();
                                 $('#bsi-delete-disk-dup-cancel').hide();
                                 $('#bsi-disk-status').html('<span style="color:#c62828;">✗ ' + (response.data.message || 'Ошибка') + '</span>');
                         }
                 }).fail(function(xhr) {
-                        $('#bsi-delete-disk-dup').show().prop('disabled', false);
+                        $('#bsi-delete-disk-dup').show();
+                        bsiUpdateDangerButtons();
                         $('#bsi-delete-disk-dup-cancel').hide();
                         $('#bsi-disk-status').html('<span style="color:#c62828;">✗ AJAX error: ' + xhr.status + '</span>');
                 });
@@ -626,6 +709,7 @@ jQuery(function($) {
 
         $('#bsi-delete-disk-dup').on('click', function(e) {
                 e.preventDefault();
+                if (!bsiDangerUnlocked) return;
                 if (!confirm('<?php esc_attr_e( 'ВНИМАНИЕ! Будут удалены ВСЕ файлы вида basename-N.ext. Оригиналы НЕ трогаются. Необратимо. Продолжить?', 'beestore-integration' ); ?>')) return;
                 bsiDiskDup.deletedTotal = 0;
                 bsiDiskDup.freedTotal = 0;

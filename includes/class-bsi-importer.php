@@ -1538,6 +1538,19 @@ class BSI_Importer {
                         return;
                 }
 
+                // #1 ФИКС: поднимаем PHP time-limit и memory_limit — ночной полный
+                // импорт может идти 5-30 минут на больших каталогах. Без этого
+                // PHP-таймаут хостинга убивает процесс посередине.
+                if ( function_exists( 'set_time_limit' ) ) {
+                        @set_time_limit( 0 ); // 0 = без лимита.
+                }
+                if ( function_exists( 'ini_set' ) ) {
+                        $current = @ini_get( 'memory_limit' );
+                        if ( $current && -1 !== (int) $current ) {
+                                @ini_set( 'memory_limit', WP_MAX_MEMORY_LIMIT );
+                        }
+                }
+
                 // Как и инкрементальный — не конфликтуем с другим импортом.
                 $lock = get_transient( 'bsi_import_lock' );
                 if ( false !== $lock ) {
@@ -1550,6 +1563,33 @@ class BSI_Importer {
                         delete_transient( 'bsi_import_lock_pid' );
                 }
 
+                // ════════════════════════════════════════════════════════════════
+                // #1 ФИКС: RESUME-логика. Если прошлый запуск не дошёл до конца —
+                // продолжаем с сохранённой байтовой позиции. Состояние хранится
+                // в опции bsi_full_import_state.
+                // ════════════════════════════════════════════════════════════════
+                $resume = get_option( 'bsi_full_import_state', array() );
+                if ( ! empty( $resume['csv_file'] ) && file_exists( $resume['csv_file'] ) && ! empty( $resume['byte_offset'] ) ) {
+                        $this->log( 'info', 'Cron полный: возобновляем прерванный импорт', array(
+                                'file'       => basename( $resume['csv_file'] ),
+                                'offset'     => $resume['byte_offset'],
+                                'started_at' => isset( $resume['started_at'] ) ? $resume['started_at'] : '',
+                        ) );
+
+                        $this->import_csv_file( $resume['csv_file'], $resume['zip_file'], $resume['byte_offset'] );
+
+                        // Проверим — завершился ли импорт (state должен был очиститься).
+                        $after = get_option( 'bsi_full_import_state', array() );
+                        if ( ! empty( $after['byte_offset'] ) ) {
+                                // Всё ещё не закончили — планируем следующий кусок через 5 минут.
+                                wp_schedule_single_event( time() + 5 * MINUTE_IN_SECONDS, 'bsi_cron_full_import' );
+                                $this->log( 'info', 'Cron полный: запланировано продолжение через 5 минут', array(
+                                        'offset' => $after['byte_offset'],
+                                ) );
+                        }
+                        return;
+                }
+
                 $this->log( 'info', 'Запуск ежедневного полного импорта каталога' );
 
                 $result = BSI_FTP::instance()->fetch_latest_zip( 'full' );
@@ -1560,16 +1600,26 @@ class BSI_Importer {
                         return;
                 }
 
-                // Импортируем полный каталог (замена).
+                // Импортируем полный каталог (замена) — с нуля.
                 $this->import_csv_file( $result['csv'], $result['zip'] );
 
-                // Пометим как обработанный.
-                $file_to_mark = $result['zip'] ? $result['zip'] : $result['csv'];
-                BSI_FTP::instance()->mark_processed( $file_to_mark );
-
-                $this->log( 'info', 'Cron полный: каталог импортирован', array(
-                        'file' => basename( $result['remote_name'] ),
-                ) );
+                // Пометим как обработанный — ТОЛЬКО если импорт завершён полностью.
+                // Если state ещё жив (импорт прерван) — НЕ помечаем, чтобы следующий
+                // cron-тик докачал остаток.
+                $post_state = get_option( 'bsi_full_import_state', array() );
+                if ( empty( $post_state['byte_offset'] ) ) {
+                        $file_to_mark = $result['zip'] ? $result['zip'] : $result['csv'];
+                        BSI_FTP::instance()->mark_processed( $file_to_mark );
+                        $this->log( 'info', 'Cron полный: каталог импортирован', array(
+                                'file' => basename( $result['remote_name'] ),
+                        ) );
+                } else {
+                        // Импорт не закончен — продолжим через 5 минут.
+                        wp_schedule_single_event( time() + 5 * MINUTE_IN_SECONDS, 'bsi_cron_full_import' );
+                        $this->log( 'info', 'Cron полный: импорт прерван, продолжение через 5 минут', array(
+                                'offset' => $post_state['byte_offset'],
+                        ) );
+                }
         }
 
         /* ---------------------------------------------------------------------
@@ -1611,48 +1661,53 @@ class BSI_Importer {
         /* ---------------------------------------------------------------------
          * Основной метод импорта CSV-файла.
          *
-         * @param string $csv_file Путь к CSV.
-         * @param string $zip_file Опционально — путь к ZIP (для лога и mark_processed).
-         *                         Если пусто — значит CSV был скачан напрямую (без ZIP-обёртки).
+         * @param string $csv_file      Путь к CSV.
+         * @param string $zip_file      Опционально — путь к ZIP (для лога и mark_processed).
+         *                              Если пусто — значит CSV был скачан напрямую (без ZIP-обёртки).
+         * @param int    $resume_offset Опционально — байтовая позиция для resume (см. cron_full_import).
          * @return array Отчёт.
          * --------------------------------------------------------------------- */
-        public function import_csv_file( $csv_file, $zip_file = '' ) {
+        public function import_csv_file( $csv_file, $zip_file = '', $resume_offset = 0 ) {
                 // ─── ЗАЩИТА ОТ ПАРАЛЛЕЛЬНОГО ИМПОРТА ────────────────────────────────
                 // Если импорт уже идёт (другой процесс cron или AJAX) — выходим.
                 // Без этого два процесса могут одновременно создавать дубли товаров.
-                $lock = get_transient( 'bsi_import_lock' );
-                if ( false !== $lock ) {
-                        $lock_age = time() - (int) $lock;
-                        // Если лок больше 30 минут — считаем зависшим, сбрасываем.
-                        if ( $lock_age < 1800 ) {
-                                $this->log( 'warning', 'Импорт уже идёт в другом процессе — пропускаем', array(
-                                        'lock_age_seconds' => $lock_age,
-                                        'csv'              => basename( $csv_file ),
-                                ) );
-                                return array(
-                                        'success' => false,
-                                        'error'   => 'import_in_progress',
-                                        'message' => sprintf(
-                                            /* translators: %d — секунды */
-                                            __( 'Импорт уже идёт в другом процессе (%d сек назад начат). Пропускаем.', 'beestore-integration' ),
-                                            $lock_age
-                                        ),
-                                );
+                // ВАЖНО: при resume (resume_offset > 0) lock уже выставлен прошлым тиком —
+                // пропускаем проверку, иначе resume-тик не сможет продолжить.
+                if ( empty( $resume_offset ) ) {
+                        $lock = get_transient( 'bsi_import_lock' );
+                        if ( false !== $lock ) {
+                                $lock_age = time() - (int) $lock;
+                                // Если лок больше 30 минут — считаем зависшим, сбрасываем.
+                                if ( $lock_age < 1800 ) {
+                                        $this->log( 'warning', 'Импорт уже идёт в другом процессе — пропускаем', array(
+                                                'lock_age_seconds' => $lock_age,
+                                                'csv'              => basename( $csv_file ),
+                                        ) );
+                                        return array(
+                                                'success' => false,
+                                                'error'   => 'import_in_progress',
+                                                'message' => sprintf(
+                                                        /* translators: %d — секунды */
+                                                        __( 'Импорт уже идёт в другом процессе (%d сек назад начат). Пропускаем.', 'beestore-integration' ),
+                                                        $lock_age
+                                                ),
+                                        );
+                                }
+                                $this->log( 'warning', 'Старый lock импорта обнаружен — сбрасываем', array( 'lock_age' => $lock_age ) );
                         }
-                        $this->log( 'warning', 'Старый lock импорта обнаружен — сбрасываем', array( 'lock_age' => $lock_age ) );
+                        set_transient( 'bsi_import_lock', time(), 1800 ); // 30 минут максимум.
+
+                        // Сохраняем PID для диагностики.
+                        $lock_pid = function_exists( 'getmypid' ) ? getmypid() : 0;
+                        set_transient( 'bsi_import_lock_pid', $lock_pid, 1800 );
+
+                        // Регистрируем shutdown-функцию чтобы гарантированно освободить lock
+                        // даже при fatal error или timeout.
+                        register_shutdown_function( function () {
+                                delete_transient( 'bsi_import_lock' );
+                                delete_transient( 'bsi_import_lock_pid' );
+                        } );
                 }
-                set_transient( 'bsi_import_lock', time(), 1800 ); // 30 минут максимум.
-
-                // Сохраняем PID для диагностики.
-                $lock_pid = function_exists( 'getmypid' ) ? getmypid() : 0;
-                set_transient( 'bsi_import_lock_pid', $lock_pid, 1800 );
-
-                // Регистрируем shutdown-функцию чтобы гарантированно освободить lock
-                // даже при fatal error или timeout.
-                register_shutdown_function( function () {
-                        delete_transient( 'bsi_import_lock' );
-                        delete_transient( 'bsi_import_lock_pid' );
-                } );
                 // ────────────────────────────────────────────────────────────────────
 
                 $start_time = microtime( true );
@@ -1662,6 +1717,20 @@ class BSI_Importer {
                         delete_transient( 'bsi_import_lock' );
                         delete_transient( 'bsi_import_lock_pid' );
                         return array( 'success' => false, 'error' => $parser->get_error_message() );
+                }
+
+                // #1 ФИКС: если resumed — перематываем парсер на сохранённую позицию.
+                if ( ! empty( $resume_offset ) ) {
+                        $seeked = $parser->seek_byte_offset( (int) $resume_offset );
+                        if ( ! $seeked ) {
+                                // Не удалось перемотать — файл мог измениться. Начинаем с нуля.
+                                $this->log( 'warning', 'Resume: не удалось перемотать CSV — начинаем с начала', array(
+                                        'offset' => $resume_offset,
+                                ) );
+                                $resume_offset = 0;
+                        } else {
+                                $this->log( 'info', 'Resume: перемотано на позицию', array( 'offset' => $resume_offset ) );
+                        }
                 }
 
                 // Сохраняем имя ZIP как маркер "последнего импорта".
@@ -1686,6 +1755,15 @@ class BSI_Importer {
 
                 // Сброс счётчиков фильтров (для лимитов) в начале импорта.
                 BSI_Import_Filters::instance()->reset_counters();
+
+                // #1 ФИКС: мягкий бюджет времени. Если импорт идёт дольше 45 минут —
+                // сохраняем состояние и выходим, чтобы cron-тик продолжил с этой позиции
+                // через 5 минут (см. cron_full_import → wp_schedule_single_event).
+                // 45 минут — с запасом, чтобы не нарваться на 60-минутный hard limit хостинга.
+                $time_budget_seconds = 45 * MINUTE_IN_SECONDS;
+                $time_check_every    = max( 1, $batch_size ); // проверяем время каждый батч.
+                $rows_since_check    = 0;
+                $time_exceeded       = false;
 
                 foreach ( $parser as $idx => $row ) {
                         $processed_count++;
@@ -1737,8 +1815,54 @@ class BSI_Importer {
                         if ( count( $models ) >= $batch_size ) {
                                 $this->process_models_batch( $models );
                                 $models = array(); // сброс.
+
+                                // #1: проверка времени — каждый батч.
+                                $rows_since_check += $batch_size;
+                                if ( $rows_since_check >= $time_check_every ) {
+                                        $rows_since_check = 0;
+                                        $elapsed_so_far = microtime( true ) - $start_time;
+                                        if ( $elapsed_so_far > $time_budget_seconds ) {
+                                                $time_exceeded = true;
+                                                $this->log( 'info', 'Импорт: мягкий лимит времени достигнут — сохраняем state для resume', array(
+                                                        'elapsed'   => round( $elapsed_so_far, 1 ),
+                                                        'processed' => $processed_count,
+                                                ) );
+                                                break;
+                                        }
+                                }
                         }
                 }
+
+                // #1: если время вышло — сохраняем состояние для resume и выходим.
+                if ( $time_exceeded ) {
+                        $byte_offset = $parser->get_byte_offset();
+                        $parser->close();
+                        if ( $byte_offset && $byte_offset > 0 ) {
+                                update_option( 'bsi_full_import_state', array(
+                                        'csv_file'    => $csv_file,
+                                        'zip_file'    => $zip_file,
+                                        'byte_offset' => $byte_offset,
+                                        'started_at'  => get_option( 'bsi_last_import_started', current_time( 'mysql' ) ),
+                                        'updated_at'  => current_time( 'mysql' ),
+                                ), false );
+                                $this->log( 'info', 'Импорт прерван: state сохранён для resume', array(
+                                        'offset'    => $byte_offset,
+                                        'processed' => $processed_count,
+                                ) );
+                        } else {
+                                // Не удалось получить offset — снимаем lock, чтобы cron смог перезапустить.
+                                delete_transient( 'bsi_import_lock' );
+                                delete_transient( 'bsi_import_lock_pid' );
+                        }
+                        return array(
+                                'success'        => false,
+                                'error'          => 'time_budget_exceeded',
+                                'rows_processed' => $processed_count,
+                                'elapsed_seconds'=> round( microtime( true ) - $start_time, 2 ),
+                                'resume_offset'  => $byte_offset,
+                        );
+                }
+
                 $parser->close();
 
                 // Финальный чанк.
@@ -1775,6 +1899,9 @@ class BSI_Importer {
                 // Снимаем lock импорта.
                 delete_transient( 'bsi_import_lock' );
                 delete_transient( 'bsi_import_lock_pid' );
+
+                // #1 ФИКС: импорт завершён полностью — очищаем resume-state.
+                delete_option( 'bsi_full_import_state' );
 
                 return $report;
         }
@@ -2859,6 +2986,18 @@ class BSI_Importer {
                 } elseif ( ! empty( $row['DSArticolo'] ) ) {
                         $title = $row['DSArticolo'];
                 }
+                // #3 ФИКС: явная обрезка по границе слова до 250 символов.
+                // Без этого MySQL молча обрежет post_title (VARCHAR(255)) посередине слова,
+                // что выглядит как «режет модель» в админке.
+                if ( mb_strlen( $title ) > 250 ) {
+                        $cut = mb_substr( $title, 0, 250 );
+                        // Откатываемся до последнего пробела, чтобы не обрезать слово.
+                        $last_space = mb_strrpos( $cut, ' ' );
+                        if ( false !== $last_space && $last_space > 100 ) {
+                                $cut = mb_substr( $cut, 0, $last_space );
+                        }
+                        $title = rtrim( $cut, ' ,.;:!?-' ) . '…';
+                }
                 if ( $title ) {
                         $product->set_name( $title );
                 }
@@ -2906,10 +3045,17 @@ class BSI_Importer {
                 }
 
                 // Статус публикации.
-                $product->set_status( 'publish' );
+                // #5 ФИКС: если опция draft_out_of_stock включена и остаток = 0 —
+                // публикуем как черновик (а не как publish с outofstock).
+                $settings  = get_option( 'bsi_settings', array() );
+                $draft_oos = isset( $settings['draft_out_of_stock'] ) && '1' === $settings['draft_out_of_stock'];
+                if ( $draft_oos && $stock <= 0 ) {
+                        $product->set_status( 'draft' );
+                } else {
+                        $product->set_status( 'publish' );
+                }
 
                 // Tax (VAT).
-                $settings = get_option( 'bsi_settings', array() );
                 $tax_rate = isset( $settings['default_tax_rate'] ) ? (float) $settings['default_tax_rate'] : 22;
                 $product->set_tax_status( 'taxable' );
                 $product->set_tax_class( '' ); // Стандартная ставка.
@@ -3143,24 +3289,54 @@ class BSI_Importer {
          *
          * ВАЖНО: При обновлении существующего терма НЕ ТРОГАЕМ slug и thumbnail_id.
          * Это позволяет админу загружать картинки для категорий — плагин их не перезапишет.
+         *
+         * #18 ФИКС: Поиск идёт по slug (sanitize_title), а не по name.
+         * Раньше term_exists($name, ...) — это приводило к склеиванию категорий,
+         * если BeeStore присылал имя в разном регистре (MAGLIA vs Maglia).
+         * Slug стабилен независимо от регистра/пробелов.
          */
         private function ensure_term( $name, $taxonomy, $parent_name = '' ) {
                 $parent = 0;
                 if ( $parent_name ) {
-                        $parent_term = term_exists( $parent_name, $taxonomy );
-                        if ( is_array( $parent_term ) ) {
-                                $parent = (int) $parent_term['term_id'];
+                        $parent_slug = sanitize_title( $parent_name );
+                        $parent_term = get_term_by( 'slug', $parent_slug, $taxonomy );
+                        if ( ! $parent_term && is_taxonomy_hierarchical( $taxonomy ) ) {
+                                // Fallback на имя для обратной совместимости со старыми термами.
+                                $parent_term = get_term_by( 'name', $parent_name, $taxonomy );
+                        }
+                        if ( $parent_term ) {
+                                $parent = (int) $parent_term->term_id;
                         }
                 }
 
-                $existing = term_exists( $name, $taxonomy, $parent );
-                if ( is_array( $existing ) ) {
-                        return (int) $existing['term_id'];
+                $slug = sanitize_title( $name );
+
+                // Сначала ищем по slug — это канонический способ.
+                $existing = get_term_by( 'slug', $slug, $taxonomy );
+                if ( $existing ) {
+                        return (int) $existing->term_id;
                 }
 
-                $result = wp_insert_term( $name, $taxonomy, array( 'parent' => $parent ) );
+                // Fallback: возможно старая категория создавалась без slug или с другим slug.
+                // Используем term_exists с именем (только для иерархических таксономий).
+                if ( is_taxonomy_hierarchical( $taxonomy ) ) {
+                        $legacy = term_exists( $name, $taxonomy, $parent );
+                        if ( is_array( $legacy ) ) {
+                                return (int) $legacy['term_id'];
+                        }
+                }
+
+                $result = wp_insert_term( $name, $taxonomy, array(
+                        'parent' => $parent,
+                        'slug'   => $slug,
+                ) );
                 if ( ! is_wp_error( $result ) ) {
                         return (int) $result['term_id'];
+                }
+                // Если slug уже занят (другое имя, тот же slug) — берём существующий.
+                $by_slug = get_term_by( 'slug', $slug, $taxonomy );
+                if ( $by_slug ) {
+                        return (int) $by_slug->term_id;
                 }
                 return 0;
         }
@@ -3440,8 +3616,22 @@ class BSI_Importer {
                         return false;
                 }
 
-                // Определяем реальное расширение файла по содержимому.
+                // #13 ФИКС: определяем реальное расширение файла по содержимому.
+                // Раньше если download_url() вернул HTML-страницу с 404 или ошибкой Sirio
+                // (HTTP 200 OK, но не картинка), плагин создавал attachment с битым
+                // содержимым и mime = image/jpeg. Теперь явно проверяем: если
+                // wp_get_image_mime() вернул false — это не картинка, выходим.
                 $real_mime = wp_get_image_mime( $tmp_file );
+                if ( ! $real_mime ) {
+                        @unlink( $tmp_file );
+                        $this->log( 'warning', 'Скачанный файл не является картинкой (невалидный MIME)', array(
+                                'url'       => $url,
+                                'basename'  => $filename_without_ext,
+                                'tmp_size'  => @filesize( $tmp_file ),
+                        ) );
+                        $wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $lock_name ) );
+                        return false;
+                }
                 $ext_map = array(
                         'image/jpeg' => 'jpg',
                         'image/png'  => 'png',
@@ -4586,15 +4776,30 @@ class BSI_Importer {
         }
 
         /**
-         * Получить CSV для импорта остатков (переиспользует логику каталога).
+         * Получить CSV для импорта остатков.
+         *
+         * #8 ФИКС: сначала пытаемся скачать свежий инкрементальный CSV с FTP
+         * (как это делает cron_import). Только если FTP недоступен или новых
+         * файлов нет — fallback на самый свежий локальный CSV в папках
+         * uploads/beestore/{downloads,extracted,processed,manual-downloads}.
          *
          * @return array|WP_Error
          */
         private function get_stock_csv_item() {
-                $upload_dir = wp_upload_dir();
+                // 1) Пробуем FTP — инкрементальный файл.
+                $fetch = BSI_FTP::instance()->fetch_latest_zip( 'incremental' );
+                if ( ! is_wp_error( $fetch ) && ! empty( $fetch['csv'] ) && file_exists( $fetch['csv'] ) ) {
+                        return array(
+                                'csv_file'    => $fetch['csv'],
+                                'remote_name' => basename( $fetch['remote_name'] ),
+                        );
+                }
+
+                // 2) Fallback — локальные папки (для оффлайн-разработки или при сбое FTP).
+                $upload_dir   = wp_upload_dir();
                 $beestore_dir = trailingslashit( $upload_dir['basedir'] ) . 'beestore';
-                $dirs = array( 'downloads', 'extracted', 'processed', 'manual-downloads' );
-                $csvs = array();
+                $dirs         = array( 'downloads', 'extracted', 'processed', 'manual-downloads' );
+                $csvs         = array();
                 foreach ( $dirs as $subdir ) {
                         $path = $beestore_dir . '/' . $subdir;
                         if ( is_dir( $path ) ) {
@@ -4605,7 +4810,7 @@ class BSI_Importer {
                         usort( $csvs, function ( $a, $b ) { return filemtime( $b ) - filemtime( $a ); } );
                         return array( 'csv_file' => $csvs[0], 'remote_name' => basename( $csvs[0] ) );
                 }
-                return new WP_Error( 'bsi_stock_no_csv', __( 'Нет CSV-файла для синхронизации остатков.', 'beestore-integration' ) );
+                return new WP_Error( 'bsi_stock_no_csv', __( 'Нет CSV-файла для синхронизации остатков (FTP пуст и локальных файлов нет).', 'beestore-integration' ) );
         }
 
         /**

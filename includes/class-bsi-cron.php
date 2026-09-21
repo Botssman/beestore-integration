@@ -21,7 +21,11 @@ class BSI_Cron {
         }
 
         private function __construct() {
-                add_action( 'bsi_cron_import_catalog', array( BSI_Importer::instance(), 'cron_import' ) );
+                // #6 ФИКС: убран дубль add_action('bsi_cron_import_catalog') —
+                // он уже зарегистрирован в BSI_Importer::__construct(). Раньше
+                // каждый cron-тик запускал cron_import() ДВАЖДЫ: первый процесс
+                // ставил lock, второй сразу выходил, но тратил ресурсы на инициализацию.
+                // Теперь регистрация единая — в BSI_Importer.
                 add_action( 'bsi_cron_status_sync', array( BSI_Status_Sync::instance(), 'cron_sync' ) );
                 add_action( 'bsi_cron_process_queue', array( BSI_Order_Sync::instance(), 'process_queue' ) );
 

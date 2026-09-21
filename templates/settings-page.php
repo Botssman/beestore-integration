@@ -36,6 +36,7 @@ $enable_order_sync     = isset( $settings['enable_order_sync'] ) && '1' === $set
 $enable_status_sync    = isset( $settings['enable_status_sync'] ) && '1' === $settings['enable_status_sync'];
 $enable_realtime_stock = isset( $settings['enable_realtime_stock'] ) && '1' === $settings['enable_realtime_stock'];
 $delete_out_of_stock   = isset( $settings['delete_out_of_stock'] ) && '1' === $settings['delete_out_of_stock'];
+$draft_out_of_stock    = isset( $settings['draft_out_of_stock'] ) && '1' === $settings['draft_out_of_stock'];
 $download_images       = ! isset( $settings['download_images'] ) || '1' === $settings['download_images'];
 $draft_no_image        = ! isset( $settings['draft_no_image'] ) || '1' === $settings['draft_no_image'];
 
@@ -224,6 +225,12 @@ $source_label = isset( $source_names[ $current_rate_info['source'] ] ) ? $source
                                                         <input type="checkbox" name="bsi_settings[delete_out_of_stock]" value="1" <?php checked( $delete_out_of_stock ); ?>>
                                                         <?php esc_html_e( 'Если товар не встретился в утренней выгрузке — скрывать', 'beestore-integration' ); ?>
                                                 </label>
+                                                <br>
+                                                <label>
+                                                        <input type="checkbox" name="bsi_settings[draft_out_of_stock]" value="1" <?php checked( $draft_out_of_stock ); ?>>
+                                                        <?php esc_html_e( 'Переводить в черновик товары с нулевым остатком (Disponibilita = 0)', 'beestore-integration' ); ?>
+                                                </label>
+                                                <p class="description"><?php esc_html_e( 'Если включено — товары с остатком 0 будут публиковаться как draft, а не как publish со статусом outofstock.', 'beestore-integration' ); ?></p>
                                         </td>
                                 </tr>
                                 <tr>

@@ -188,6 +188,7 @@ class BSI_Settings {
                 $output['enable_status_sync']    = isset( $input['enable_status_sync'] ) ? '1' : '0';
                 $output['enable_realtime_stock'] = isset( $input['enable_realtime_stock'] ) ? '1' : '0';
                 $output['delete_out_of_stock']   = isset( $input['delete_out_of_stock'] ) ? '1' : '0';
+                $output['draft_out_of_stock']    = isset( $input['draft_out_of_stock'] ) ? '1' : '0';
                 $output['download_images']       = isset( $input['download_images'] ) ? '1' : '0';
                 $output['draft_no_image']        = isset( $input['draft_no_image'] ) ? '1' : '0';
 

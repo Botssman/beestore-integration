@@ -54,6 +54,7 @@ class BSI_Installer {
                                 'download_images'    => '1',
                                 'draft_no_image'    => '1',
                                 'delete_out_of_stock' => '0', // Если 1 — снимать с публикации товары, отсутствующие в выгрузке.
+                                'draft_out_of_stock'  => '0', // Если 1 — переводить в черновик товары с Disponibilita = 0.
                                 'mapping_payment'    => array(), // WC gateway_id => IDTipoIncasso.
                                 // WebP конвертация.
                                 'webp_enabled'            => '0',  // Конвертировать картинки в WebP.

@@ -153,6 +153,35 @@ class BSI_CSV_Iterator implements Iterator, Countable {
                 return $this->headers;
         }
 
+        /**
+         * Текущая позиция в файле (ftell). Используется для resume импорта.
+         *
+         * @return int|false
+         */
+        public function get_byte_offset() {
+                if ( ! $this->handle ) {
+                        return false;
+                }
+                return ftell( $this->handle );
+        }
+
+        /**
+         * Переместиться на указанную байтовую позицию и прочитать следующую строку.
+         * Используется для resume полного импорта после timeout.
+         *
+         * @param int $offset Байтовая позиция (из get_byte_offset).
+         * @return bool true — успешно, false — неудача.
+         */
+        public function seek_byte_offset( $offset ) {
+                if ( ! $this->handle || $offset <= 0 ) {
+                        return false;
+                }
+                fseek( $this->handle, (int) $offset );
+                // Читаем следующую строку — мы оказались в середине строки после fseek.
+                $this->read_next();
+                return false !== $this->current_row;
+        }
+
         #[\ReturnTypeWillChange]
         public function current() {
                 return $this->current_row;

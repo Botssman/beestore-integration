@@ -235,6 +235,9 @@ class BSI_Importer {
                         }
                         $csv_file    = $fetch_result['csv'];
                         $remote_name = basename( ltrim( $fetch_result['remote_name'], './' ) );
+
+                        // Помечаем файл как обработанный — чтобы cron не скачал его снова.
+                        BSI_FTP::instance()->mark_processed( $remote_name );
                 }
 
                 // Считаем количество строк.

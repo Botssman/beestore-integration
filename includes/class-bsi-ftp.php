@@ -280,6 +280,9 @@ class BSI_FTP {
                 $target    = trailingslashit( $dest_dir ) . $base_name;
                 if ( file_exists( $zip_file ) ) {
                         @rename( $zip_file, $target ); // phpcs:ignore
+                } else {
+                        // Файл не найден локально — создаём пустой маркер.
+                        @touch( $target );
                 }
                 // Если это был ZIP — переместить каталог extracted тоже.
                 $extracted_dir = trailingslashit( $this->get_extract_dir() ) . pathinfo( $zip_file, PATHINFO_FILENAME );
@@ -394,23 +397,30 @@ class BSI_FTP {
                 // Выбираем файл для импорта.
                 $target = null;
                 if ( ! $last_processed ) {
-                        // Первый запуск — ищем самый свежий _0000001.csv (полный каталог).
-                        // Сначала пытаемся найти _0000001 за самую свежую дату.
-                        $full_catalog_files = array_filter( $parsed, function ( $p ) {
-                                return 1 === $p['sequence'];
-                        } );
-                        if ( ! empty( $full_catalog_files ) ) {
-                                // Берём самый свежий _0000001.
-                                $target = end( $full_catalog_files );
-                                BSI_Logger::instance()->info( 'ftp', 'Первый импорт: выбран полный каталог', array(
+                        // Первый запуск — нет обработанных файлов.
+                        if ( 'incremental' === $type ) {
+                                // Для инкрементальных — берём самый СВЕЖИЙ (последний).
+                                $target = end( $parsed );
+                                BSI_Logger::instance()->info( 'ftp', 'Первый импорт инкрементальных: взят самый свежий', array(
                                         'file' => $target['name'],
                                 ) );
                         } else {
-                                // Если _0000001 не нашли — берём самый старый файл (возможно, только инкрементальные).
-                                $target = $parsed[0];
-                                BSI_Logger::instance()->warn( 'ftp', 'Не найден _0000001.csv (полный каталог). Берём самый старый файл.', array(
-                                        'file' => $target['name'],
-                                ) );
+                                // Для полных/всех — ищем самый свежий _0000001.csv (полный каталог).
+                                $full_catalog_files = array_filter( $parsed, function ( $p ) {
+                                        return 1 === $p['sequence'];
+                                } );
+                                if ( ! empty( $full_catalog_files ) ) {
+                                        $target = end( $full_catalog_files );
+                                        BSI_Logger::instance()->info( 'ftp', 'Первый импорт: выбран полный каталог', array(
+                                                'file' => $target['name'],
+                                        ) );
+                                } else {
+                                        // Если _0000001 не нашли — берём самый свежий файл.
+                                        $target = end( $parsed );
+                                        BSI_Logger::instance()->warn( 'ftp', 'Не найден _0000001.csv. Берём самый свежий файл.', array(
+                                                'file' => $target['name'],
+                                        ) );
+                                }
                         }
                 } else {
                         // Уже импортировали — ищем следующий файл после последнего обработанного.
